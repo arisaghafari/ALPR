@@ -14,7 +14,7 @@ nvbuf-memory-type=3
 [source0]
 enable=1
 type=3
-uri=file:///opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/sample.mp4
+uri=file:///opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/video_0.mp4
 num-sources=1
 gpu-id=0
 cudadec-memtype=2
