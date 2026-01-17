@@ -3,7 +3,7 @@ gpu-id=0
 net-scale-factor=0.0039215697906911373
 model-color-format=0
 onnx-file=license-plate-finetune-v1n.onnx
-model-engine-file=model_lp.engine
+model-engine-file=license-plate-finetune-v1n.onnx_b4_gpu0_fp16.engine
 labelfile-path=labels_lpd.txt
 parse-bbox-func-name=NvDsInferParseYolo
 custom-lib-path=nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so
@@ -13,8 +13,8 @@ process-mode=2
 gie-unique-id=2
 operate-on-gie-id=1
 operate-on-class-ids=2;3;5;7
-batch-size=8
-workspace-size=256
+batch-size=4
+workspace-size=1024
 
 # CRITICAL FIXES
 maintain-aspect-ratio=1
@@ -29,7 +29,7 @@ num-detected-classes=1
 cluster-mode=2
 
 [class-attrs-all]
-pre-cluster-threshold=0.05
+pre-cluster-threshold=0.25
 topk=20
 nms-iou-threshold=0.5
 # Show plate labels
