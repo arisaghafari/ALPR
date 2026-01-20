@@ -1,0 +1,50 @@
+[property]
+gpu-id=0
+enable-dla=0
+net-scale-factor=0.0039215697906911373
+model-color-format=0
+onnx-file=yolo11n.onnx
+model-engine-file=model_b1_gpu0_fp16.engine
+labelfile-path=labels.txt
+batch-size=1
+network-mode=2
+num-detected-classes=80
+interval=0
+gie-unique-id=1
+process-mode=1
+network-type=0
+cluster-mode=2
+maintain-aspect-ratio=1
+symmetric-padding=1
+workspace-size=256
+parse-bbox-func-name=NvDsInferParseYolo
+custom-lib-path=nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so
+engine-create-func-name=NvDsInferYoloCudaEngineGet
+
+#nvbuf-memory-type=0
+
+[class-attrs-all]
+nms-iou-threshold=0.45
+pre-cluster-threshold=1.25
+topk=300
+display-text=0
+
+# Region of Interest
+roi-top-offset=300
+roi-left-offset=200
+
+# Car
+[class-attrs-2]
+pre-cluster-threshold=0.35
+
+# Motorcycle
+[class-attrs-3]
+pre-cluster-threshold=0.35
+
+# Bus
+[class-attrs-5]
+pre-cluster-threshold=0.35
+
+# Truck
+[class-attrs-7]
+pre-cluster-threshold=0.35
