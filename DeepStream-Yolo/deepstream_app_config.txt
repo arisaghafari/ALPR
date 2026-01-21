@@ -85,8 +85,6 @@ tracker-width=640
 tracker-height=384
 ll-lib-file=/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so
 ll-config-file=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvSORT.yml
-#ll-config-file=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvDCF_perf.yml
-#ll-config-file=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_IOU.yml
 display-tracking-id=0
 
 [primary-gie]
@@ -104,14 +102,15 @@ config-file=config_infer_secondary_yolo11.txt
 gie-unique-id=2
 operate-on-gie-id=1
 operate-on-class-ids=2;3;5;7
-batch-size=4
-interval=0
+batch-size=8
+interval=2
 
 [secondary-gie1]
 enable=1
 config-file=config_infer_tertiary_lprnet.txt
 gpu-id=0
-batch-size=1
+batch-size=8
+interval=2
 gie-unique-id=3
 ## Listen to the Plate Detector (2)
 operate-on-gie-id=2
