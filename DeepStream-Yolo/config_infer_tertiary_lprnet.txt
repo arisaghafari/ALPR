@@ -5,20 +5,20 @@ net-scale-factor=0.0039215697906911373
 # --- MODEL FILES ---
 tlt-encoded-model=us_lprnet_baseline18_deployable.etlt
 labelfile-path=dict.txt
-model-engine-file=model_lprnet.engine
+model-engine-file=us_lprnet_baseline18_deployable.etlt_b1_gpu0_fp16.engine
 tlt-model-key=nvidia_tlt
 
 # --- CUSTOM PARSER (The Fix) ---
 custom-lib-path=libnvdsinfer_custom_impl_lpr.so
 # The Correct Function Name found in your C++ code:
 parse-classifier-func-name=NvDsInferParseCustomNVPlate
-
+output-blob-names=tf_op_layer_ArgMax;tf_op_layer_Max
 # --- SETTINGS ---
 network-type=1
 network-mode=2
 process-mode=2
 # We must use "threshold" here, not inside property for some versions
-classifier-threshold=0.1
+classifier-threshold=0.0
 
 # --- PIPELINE CONNECTION ---
 gie-unique-id=3
@@ -26,7 +26,7 @@ operate-on-gie-id=2
 operate-on-class-ids=0
 
 # --- INPUT SIZE ---
-input-object-min-width=48
-input-object-min-height=96
+input-object-min-width=30
+input-object-min-height=10
 maintain-aspect-ratio=0
 batch-size=1

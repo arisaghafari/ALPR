@@ -56,8 +56,8 @@ gpu-id=0
 live-source=1
 batch-size=1
 batched-push-timeout=40000
-width=960
-height=520
+width=1280
+height=720
 # Stop creating extra empty buffers (Default is often 4)
 buffer-pool-size=4
 enable-padding=0
@@ -72,9 +72,7 @@ ll-lib-file=/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.s
 ll-config-file=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvSORT.yml
 #ll-config-file=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvDCF_perf.yml
 #ll-config-file=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_IOU.yml
-display-tracking-id=1
-#Track SGIE objects too
-#sub-batches=secondary-gie0   
+display-tracking-id=0
 
 [primary-gie]
 enable=1
@@ -94,16 +92,15 @@ operate-on-class-ids=2;3;5;7
 batch-size=4
 interval=0
 
-#[secondary-gie1]
-#enable=1
-#config-file=config_infer_tertiary_lprnet.txt
-#gpu-id=0
-#batch-size=1
-## Define the Unique ID for this stage (3)
-#gie-unique-id=3
+[secondary-gie1]
+enable=1
+config-file=config_infer_tertiary_lprnet.txt
+gpu-id=0
+batch-size=1
+gie-unique-id=3
 ## Listen to the Plate Detector (2)
-#operate-on-gie-id=2
-#operate-on-class-ids=0
+operate-on-gie-id=2
+operate-on-class-ids=0
 
 [tests]
 file-loop=1
