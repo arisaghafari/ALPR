@@ -2,7 +2,6 @@
 """
 Simplified DeepStream ALPR Pipeline - FPS & Latency Only
 """
-
 import sys
 import os
 import time
@@ -19,7 +18,7 @@ OUTPUT_VIDEO = "output/output_simple.mp4"
 PGIE_CONFIG = "../DeepStream-Yolo/config_infer_primary_yolo11.txt"
 SGIE_CONFIG = "../DeepStream-Yolo/config_infer_secondary_yolo11.txt"
 TGIE_CONFIG = "../DeepStream-Yolo/config_infer_tertiary_lprnet.txt"
-TRACKER_CONFIG = "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvDCF_perf.yml"
+TRACKER_CONFIG = "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvSORT.yml"
 
 # ============================================================================
 # TIMING VARIABLES
