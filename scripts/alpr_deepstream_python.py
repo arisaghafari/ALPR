@@ -1,5 +1,21 @@
 import sys
 import os
+import cv2
+
+# ==============================================================================
+# Headless Mode Setup (for Docker/SSH without display)
+# This MUST be done BEFORE importing GStreamer
+# ==============================================================================
+if 'DISPLAY' in os.environ:
+    del os.environ['DISPLAY']
+
+# Disable EGL-related warnings in headless mode
+os.environ['EGL_PLATFORM'] = 'surfaceless'
+
+# Add the script directory to path for local imports
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
 
 # Ensure GStreamer plugin paths are set for DeepStream Docker
 if os.path.exists("/opt/nvidia/deepstream/deepstream/lib/gst-plugins"):
@@ -16,6 +32,9 @@ from gi.repository import Gst, GLib, GstRtspServer
 import pyds
 from pathlib import Path
 
+# Import plate-vehicle association modules
+from plate_association import PlateVehicleScorer, SpatialGrid
+
 # ==============================================================================
 # Configuration - Adjust paths as needed
 # ==============================================================================
@@ -24,6 +43,9 @@ CONFIG_DIR = "/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project"
 INPUT_VIDEO = f"{CONFIG_DIR}/sample.mp4"
 OUTPUT_VIDEO = f"{CONFIG_DIR}/output_video_python.mp4"
 
+cap = cv2.VideoCapture(INPUT_VIDEO)
+total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
 PGIE_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/config_infer_primary_yolo11.txt"
 SGIE_PLATE_DETECTOR_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/config_infer_secondary_yolo11.txt"
 SGIE_LPR_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/config_infer_tertiary_lprnet.txt"
@@ -31,6 +53,87 @@ TRACKER_CONFIG = "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-a
 
 # Path to main DeepStream app config (to read settings from)
 APP_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/deepstream_app_config.txt"
+
+# ==============================================================================
+# Live/Real-time Mode Configuration (defaults - can be overridden by args)
+# ==============================================================================
+# These are default values - use command line arguments to override
+LIVE_MODE = False       # --live to enable
+ENABLE_RTSP = False     # --rtsp to enable
+RTSP_PORT = 8554
+RTSP_STREAM_NAME = "alpr-stream"
+SAVE_TO_FILE = False
+
+
+def parse_arguments():
+    """Parse command line arguments."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='DeepStream ALPR Pipeline - License Plate Recognition',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  # Single pass, save to file (default)
+  python %(prog)s
+  
+  # Live mode with RTSP streaming
+  python %(prog)s --live --rtsp
+  
+  # Live mode, save to file (loops forever)
+  python %(prog)s --live
+  
+  # Single pass with RTSP
+  python %(prog)s --rtsp
+  
+  # Custom input/output
+  python %(prog)s -i /path/to/video.mp4 -o /path/to/output.mp4
+  
+  # Custom RTSP settings
+  python %(prog)s --live --rtsp --rtsp-port 8555 --rtsp-name my-stream
+        '''
+    )
+    
+    # Mode options
+    parser.add_argument('--live', action='store_true',
+                        help='Enable live mode (loop video indefinitely)')
+    parser.add_argument('--rtsp', action='store_true',
+                        help='Enable RTSP streaming output')
+    
+    # Input/Output options
+    parser.add_argument('-i', '--input', type=str, default=None,
+                        help='Input video file path')
+    parser.add_argument('-o', '--output', type=str, default=None,
+                        help='Output video file path (for file mode)')
+    
+    # RTSP options
+    parser.add_argument('--rtsp-port', type=int, default=8554,
+                        help='RTSP server port (default: 8554)')
+    parser.add_argument('--rtsp-name', type=str, default='alpr-stream',
+                        help='RTSP stream name (default: alpr-stream)')
+    
+    # Additional options
+    parser.add_argument('--save-file', action='store_true',
+                        help='Also save to file when using RTSP')
+    
+    return parser.parse_args()
+
+
+def apply_arguments(args):
+    """Apply command line arguments to global config."""
+    global LIVE_MODE, ENABLE_RTSP, RTSP_PORT, RTSP_STREAM_NAME, SAVE_TO_FILE
+    global INPUT_VIDEO, OUTPUT_VIDEO
+    
+    LIVE_MODE = args.live
+    ENABLE_RTSP = args.rtsp
+    RTSP_PORT = args.rtsp_port
+    RTSP_STREAM_NAME = args.rtsp_name
+    SAVE_TO_FILE = args.save_file
+    
+    if args.input:
+        INPUT_VIDEO = args.input
+    if args.output:
+        OUTPUT_VIDEO = args.output
 
 
 def parse_app_config(config_path):
@@ -202,13 +305,20 @@ def bus_call(bus, message, loop):
     return True
 
 
-# Grid cell size for spatial indexing (pixels)
-GRID_CELL_SIZE = 64
+# ==============================================================================
+# Plate-Vehicle Association Components (from plate_association module)
+# ==============================================================================
+spatial_grid = SpatialGrid(cell_size=64)
+plate_scorer = PlateVehicleScorer()
 
 
 def osd_sink_pad_buffer_probe(pad, info, u_data):
     """
-    Optimized probe using grid-based spatial indexing for O(1) vehicle lookup.
+    Probe function using modular plate-vehicle association.
+    Uses SpatialGrid for O(1) lookup and PlateVehicleScorer for multi-factor matching.
+    
+    IMPORTANT: Only READ metadata, avoid modifying display_text to prevent CUDA errors.
+    The OSD will use default text from the inference elements.
     """
     global frame_count, start_time
     import time
@@ -233,12 +343,11 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
         except StopIteration:
             break
         
-        # Spatial grid: key = (grid_x, grid_y), value = (vehicle_id, rect)
-        # Each vehicle occupies multiple grid cells based on its bounding box
-        vehicle_grid = {}
+        # Clear spatial grid for this frame
+        spatial_grid.clear()
         plates_to_process = []
         
-        # Single pass: build grid and collect plates
+        # Single pass: build spatial grid and collect plates
         l_obj = frame_meta.obj_meta_list
         while l_obj is not None:
             try:
@@ -246,36 +355,25 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                 
                 # Vehicles (gie-unique-id=1): Add to spatial grid
                 if obj_meta.unique_component_id == 1:
-                    obj_meta.text_params.display_text = f"{obj_meta.object_id}"
-                    rect = obj_meta.rect_params
-                    vehicle_id = obj_meta.object_id
-                    
-                    # Register vehicle in all grid cells it occupies
-                    x1 = int(rect.left) // GRID_CELL_SIZE
-                    y1 = int(rect.top) // GRID_CELL_SIZE
-                    x2 = int(rect.left + rect.width) // GRID_CELL_SIZE
-                    y2 = int(rect.top + rect.height) // GRID_CELL_SIZE
-                    
-                    for gx in range(x1, x2 + 1):
-                        for gy in range(y1, y2 + 1):
-                            cell_key = (gx, gy)
-                            if cell_key not in vehicle_grid:
-                                vehicle_grid[cell_key] = []
-                            vehicle_grid[cell_key].append((vehicle_id, rect))
+                    obj_meta.text_params.display_text = " "    # Space (not empty string)
+                    obj_meta.text_params.set_bg_clr = 0        # Hide black background
+                    spatial_grid.add_vehicle(obj_meta.object_id, obj_meta.rect_params)
                 
                 # Plates (gie-unique-id=2): Collect for processing
                 elif obj_meta.unique_component_id == 2:
+                    obj_meta.text_params.display_text = " "
+                    obj_meta.text_params.set_bg_clr = 0
                     plates_to_process.append(obj_meta)
                 
-            except:
+            except Exception:
                 pass
             
             try:
                 l_obj = l_obj.next
-            except:
+            except StopIteration:
                 break
         
-        # Process plates with O(1) grid lookup
+        # Process plates with multi-factor scoring
         for plate_meta in plates_to_process:
             try:
                 # Try parent metadata first (fastest path)
@@ -285,37 +383,23 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                     if parent_id == 18446744073709551615:  # Invalid UINT64_MAX
                         parent_id = 0
                 
-                # Fallback: O(1) grid lookup with bottom-edge matching
-                # Plates are at the BOTTOM of vehicles, so match to vehicle
-                # whose bottom edge is closest to the plate
-                if parent_id == 0 and vehicle_grid:
-                    rect = plate_meta.rect_params
-                    plate_cx = rect.left + rect.width / 2
-                    plate_cy = rect.top + rect.height / 2
-                    cell_key = (int(plate_cx) // GRID_CELL_SIZE, int(plate_cy) // GRID_CELL_SIZE)
+                # Fallback: Use spatial grid + multi-factor scoring
+                if parent_id == 0:
+                    plate_rect = plate_meta.rect_params
+                    plate_cx = plate_rect.left + plate_rect.width / 2
+                    plate_cy = plate_rect.top + plate_rect.height / 2
                     
-                    best_match = 0
-                    best_distance = float('inf')
+                    # Get candidate vehicles from spatial grid (O(1))
+                    candidates = spatial_grid.get_candidate_vehicles(plate_cx, plate_cy)
                     
-                    if cell_key in vehicle_grid:
-                        for vehicle_id, v_rect in vehicle_grid[cell_key]:
-                            # Check if plate center is inside this vehicle
-                            if (v_rect.left <= plate_cx <= v_rect.left + v_rect.width and
-                                v_rect.top <= plate_cy <= v_rect.top + v_rect.height):
-                                # Distance from plate to vehicle's BOTTOM edge
-                                # Plate should be near the bottom of its parent vehicle
-                                vehicle_bottom = v_rect.top + v_rect.height
-                                distance_to_bottom = abs(vehicle_bottom - plate_cy)
-                                
-                                # Keep the vehicle whose bottom is closest to plate
-                                if distance_to_bottom < best_distance:
-                                    best_distance = distance_to_bottom
-                                    best_match = vehicle_id
-                    
-                    parent_id = best_match
+                    # Use multi-factor scoring to find best match
+                    if candidates:
+                        parent_id, score = plate_scorer.find_best_vehicle(
+                            plate_rect, candidates, min_score=0.3
+                        )
                 
                 # Get LPR text from classifier (gie-unique-id=3)
-                plate_text = ""
+                plate_text = None
                 l_cls = plate_meta.classifier_meta_list
                 while l_cls is not None:
                     try:
@@ -327,33 +411,43 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                                     lbl = pyds.NvDsLabelInfo.cast(l_lbl.data)
                                     if lbl.result_label:
                                         plate_text = lbl.result_label
-                                except:
+                                except Exception:
                                     pass
-                    except:
+                    except Exception:
                         pass
                     try:
                         l_cls = l_cls.next
-                    except:
+                    except StopIteration:
                         break
                 
-                # Set display text
-                if parent_id > 0:
+                # Get stable plate text using majority voting
+                display_text = None
+                if parent_id > 0 and plate_text:
                     stable = get_stable_plate_for_vehicle(parent_id, plate_text, frame_count)
                     if stable:
-                        plate_meta.text_params.display_text = stable + f"_{parent_id}"
+                        display_text = stable
                 elif plate_text:
-                    plate_meta.text_params.display_text = plate_text + f"_{parent_id}"
+                    display_text = plate_text
                 
-            except:
+                # SAFE: Only set display_text if we have a valid non-empty string
+                # NEVER use empty string "" - it causes CUDA memory errors
+                if display_text and len(display_text) > 0:
+                    plate_meta.text_params.display_text = display_text
+                    plate_meta.text_params.set_bg_clr = 1
+                    plate_meta.text_params.y_offset -= 20
+                    plate_meta.text_params.font_params.font_size = 15
+                
+            except Exception:
                 pass
         
         # Cleanup old tracks periodically
         if frame_count % 150 == 0:
             cleanup_old_vehicles(frame_count)
+            print(f"[Info]{frame_count%total_frames}/{total_frames}")
         
         try:
             l_frame = l_frame.next
-        except:
+        except StopIteration:
             break
     
     return Gst.PadProbeReturn.OK
@@ -405,10 +499,79 @@ def create_encoder(element_name):
     sys.exit(1)
 
 
+def restart_pipeline(pipeline):
+    """Restart pipeline from NULL state for clean loop."""
+    pipeline.set_state(Gst.State.NULL)
+    # Wait for state change to complete
+    pipeline.get_state(Gst.CLOCK_TIME_NONE)
+    pipeline.set_state(Gst.State.PLAYING)
+    return False  # Don't repeat the timeout
+
+
+def bus_call_live(bus, message, loop_data):
+    """Handle GStreamer bus messages for live mode with looping."""
+    loop, pipeline = loop_data
+    t = message.type
+    
+    if t == Gst.MessageType.EOS:
+        if LIVE_MODE:
+            print("[LOOP] End of stream, restarting...")
+            # Schedule restart on main loop to avoid issues
+            GLib.timeout_add(100, restart_pipeline, pipeline)
+        else:
+            loop.quit()
+    elif t == Gst.MessageType.ERROR:
+        err, debug = message.parse_error()
+        print(f"[ERROR] {err}: {debug}")
+        loop.quit()
+    return True
+
+
+def start_rtsp_server(pipeline, osd):
+    """Start RTSP server for streaming output."""
+    
+    # Create RTSP server
+    server = GstRtspServer.RTSPServer.new()
+    server.set_service(str(RTSP_PORT))
+    
+    # Create factory
+    factory = GstRtspServer.RTSPMediaFactory.new()
+    
+    # For RTSP, we need to create a separate encoding pipeline
+    # that reads from the main pipeline's OSD output
+    # Using appsrc/appsink approach or tee element
+    
+    # Simpler approach: Use UDP sink and RTSP server reads from it
+    launch_str = (
+        "( udpsrc name=pay0 port=5400 caps=\"application/x-rtp, media=video, "
+        "clock-rate=90000, encoding-name=H264, payload=96\" )"
+    )
+    
+    factory.set_launch(launch_str)
+    factory.set_shared(True)
+    
+    # Get mount points and add our stream
+    mounts = server.get_mount_points()
+    mounts.add_factory(f"/{RTSP_STREAM_NAME}", factory)
+    
+    # Start server
+    server.attach(None)
+    
+    print(f"[RTSP] Server started at rtsp://localhost:{RTSP_PORT}/{RTSP_STREAM_NAME}")
+    
+    return server
+
+
 def main():
     """Main function to set up and run the DeepStream ALPR pipeline."""
     
+    # Parse command line arguments
+    args = parse_arguments()
+    apply_arguments(args)
+    
     print("[ALPR] Starting DeepStream ALPR Pipeline...")
+    print(f"[ALPR] Mode: {'LIVE (looping)' if LIVE_MODE else 'FILE (single pass)'}")
+    print(f"[ALPR] Output: {'RTSP streaming' if ENABLE_RTSP else 'File'}")
     
     # Change to config directory (config files use relative paths for models)
     if os.path.exists(CONFIG_DIR):
@@ -437,19 +600,19 @@ def main():
     
     # Decoder (nvv4l2decoder for Jetson)
     decoder = create_element("nvv4l2decoder", "nvv4l2-decoder")
-    # Match original config: cudadec-memtype=2
     try:
         decoder.set_property("cudadec-memtype", 2)
     except:
         pass
     
-    # Stream Muxer (matching original config)
+    # Stream Muxer
     streammux = create_element("nvstreammux", "stream-muxer")
     streammux.set_property("width", CFG['muxer_width'])
     streammux.set_property("height", CFG['muxer_height'])
     streammux.set_property("batch-size", 1)
     streammux.set_property("batched-push-timeout", CFG['muxer_batch_timeout'])
-    streammux.set_property("live-source", 0)
+    # For live mode, set live-source=1
+    streammux.set_property("live-source", 1 if LIVE_MODE else 0)
     streammux.set_property("nvbuf-memory-type", 0)
     streammux.set_property("gpu-id", 0)
     try:
@@ -457,8 +620,7 @@ def main():
     except:
         pass
     
-    # Primary GIE - Vehicle Detection (YOLO11)
-    # All settings come from config file (gpu-id, batch-size, etc.)
+    # Primary GIE - Vehicle Detection
     pgie = create_element("nvinfer", "primary-inference")
     pgie.set_property("config-file-path", PGIE_CONFIG)
     
@@ -470,17 +632,15 @@ def main():
     tracker.set_property("ll-config-file", TRACKER_CONFIG)
     tracker.set_property("display-tracking-id", 0)
     
-    # Secondary GIE - License Plate Detection (YOLO11)
-    # All settings come from config file
+    # Secondary GIE - License Plate Detection
     sgie_plate = create_element("nvinfer", "secondary-inference-plate")
     sgie_plate.set_property("config-file-path", SGIE_PLATE_DETECTOR_CONFIG)
     
-    # Tertiary GIE - License Plate Recognition (LPRNet)
-    # All settings come from config file
+    # Tertiary GIE - License Plate Recognition
     sgie_lpr = create_element("nvinfer", "secondary-inference-lpr")
     sgie_lpr.set_property("config-file-path", SGIE_LPR_CONFIG)
     
-    # Queue after inference to help with buffer management
+    # Queue after inference
     queue1 = create_element("queue", "queue1")
     
     # Video Converter (before OSD)
@@ -488,70 +648,79 @@ def main():
     nvvidconv1.set_property("gpu-id", 0)
     nvvidconv1.set_property("nvbuf-memory-type", 0)
     
-    # On-Screen Display (matching original config)
+    # On-Screen Display
     osd = create_element("nvdsosd", "onscreen-display")
-    osd.set_property("process-mode", 0)  # CPU mode (from config)
+    osd.set_property("process-mode", 0)
     osd.set_property("display-text", 1)
     osd.set_property("display-bbox", 1)
     osd.set_property("gpu-id", 0)
+    
+    # Tee for splitting output (RTSP + file)
+    tee = create_element("tee", "tee") if (ENABLE_RTSP and SAVE_TO_FILE) else None
+    
+    # Queue for RTSP branch
+    queue_rtsp = create_element("queue", "queue-rtsp") if ENABLE_RTSP else None
+    
+    # Queue for file branch
+    queue_file = create_element("queue", "queue-file") if (ENABLE_RTSP and SAVE_TO_FILE) else None
     
     # Video Converter (before encoder)
     nvvidconv2 = create_element("nvvideoconvert", "converter2")
     nvvidconv2.set_property("gpu-id", 0)
     
-    # Additional converter for software encoder (NVMM -> system memory)
-    # This will be used only if we fall back to software encoder
-    videoconvert_sw = None  # Will be created if needed
-    
-    # Caps filter for encoder input
-    capsfilter = create_element("capsfilter", "caps-filter")
-    
-    # Create encoder (try multiple options)
+    # Create encoder
     encoder, encoder_type = create_encoder("encoder")
     use_software_encoder = encoder_type == "x264enc"
     
-    # If using software encoder, need additional converter to go from NVMM to system memory
+    # Additional converter for software encoder
+    videoconvert_sw = None
     if use_software_encoder:
         videoconvert_sw = create_element("videoconvert", "converter-sw")
     
-    # Set encoder properties based on type and configure caps
+    # Caps filter
+    capsfilter = create_element("capsfilter", "caps-filter")
+    
+    # Configure encoder and caps
     if encoder_type == "nvv4l2h264enc":
-        # Jetson hardware encoder - needs NVMM memory
         caps = Gst.Caps.from_string("video/x-raw(memory:NVMM), format=I420")
         encoder.set_property("bitrate", CFG['bitrate'])
         encoder.set_property("iframeinterval", CFG['iframe_interval'])
     elif encoder_type == "x264enc":
-        # Software encoder - needs regular memory (not NVMM)
         caps = Gst.Caps.from_string("video/x-raw, format=I420")
-        encoder.set_property("bitrate", CFG['bitrate'] // 1000)  # x264enc uses kbps
+        encoder.set_property("bitrate", CFG['bitrate'] // 1000)
         encoder.set_property("key-int-max", CFG['iframe_interval'])
         encoder.set_property("tune", "zerolatency")
         encoder.set_property("speed-preset", "ultrafast")
-    elif encoder_type == "omxh264enc":
-        # OMX encoder
-        caps = Gst.Caps.from_string("video/x-raw(memory:NVMM), format=I420")
-        encoder.set_property("bitrate", CFG['bitrate'])
-        encoder.set_property("iframeinterval", CFG['iframe_interval'])
     else:
-        # Default caps
         caps = Gst.Caps.from_string("video/x-raw, format=I420")
     
     capsfilter.set_property("caps", caps)
     
-    # H264 Parser (for muxer)
+    # H264 Parser
     h264parser2 = create_element("h264parse", "h264-parser2")
     
-    # MP4 Muxer
-    muxer = create_element("qtmux", "muxer")
-    
-    # File Sink
-    sink = create_element("filesink", "file-sink")
-    sink.set_property("location", OUTPUT_VIDEO)
-    sink.set_property("sync", 0)
-    sink.set_property("async", 0)  # Important for file output
+    # Create sink based on mode
+    if ENABLE_RTSP:
+        # RTP payload for RTSP
+        rtppay = create_element("rtph264pay", "rtppay")
+        rtppay.set_property("config-interval", 1)
+        rtppay.set_property("pt", 96)
+        
+        # UDP sink for RTSP server
+        sink = create_element("udpsink", "udpsink")
+        sink.set_property("host", "127.0.0.1")
+        sink.set_property("port", 5400)
+        sink.set_property("sync", 1 if LIVE_MODE else 0)
+        sink.set_property("async", 0)
+    else:
+        # MP4 Muxer and File Sink
+        muxer = create_element("qtmux", "muxer")
+        sink = create_element("filesink", "file-sink")
+        sink.set_property("location", OUTPUT_VIDEO)
+        sink.set_property("sync", 0)
+        sink.set_property("async", 0)
     
     # Add Elements to Pipeline
-    
     pipeline.add(source)
     pipeline.add(demuxer)
     pipeline.add(h264parser)
@@ -570,19 +739,22 @@ def main():
     pipeline.add(capsfilter)
     pipeline.add(encoder)
     pipeline.add(h264parser2)
-    pipeline.add(muxer)
-    pipeline.add(sink)
+    
+    if ENABLE_RTSP:
+        if queue_rtsp:
+            pipeline.add(queue_rtsp)
+        pipeline.add(rtppay)
+        pipeline.add(sink)
+    else:
+        pipeline.add(muxer)
+        pipeline.add(sink)
     
     # Link Elements
-    
-    # Link source -> demuxer
     if not source.link(demuxer):
         print("[ERROR] Could not link source to demuxer")
         sys.exit(1)
     
-    # Demuxer -> h264parser will be linked dynamically (pad-added callback)
     def demuxer_pad_added(demuxer, pad, data):
-        """Callback for dynamic pad linking from demuxer."""
         pad_name = pad.get_name()
         if pad_name.startswith("video"):
             sink_pad = h264parser.get_static_pad("sink")
@@ -591,33 +763,25 @@ def main():
     
     demuxer.connect("pad-added", demuxer_pad_added, None)
     
-    # Link h264parser -> decoder
     if not h264parser.link(decoder):
         print("[ERROR] Could not link h264parser to decoder")
         sys.exit(1)
     
-    # Get streammux sink pad and link decoder to it
-    # Use request_pad instead of deprecated get_request_pad
+    # Link decoder to streammux
     padtemplate = streammux.get_pad_template("sink_%u")
     sinkpad = streammux.request_pad(padtemplate, "sink_0", None)
     if not sinkpad:
-        # Fallback to old method
         sinkpad = streammux.get_request_pad("sink_0")
     if not sinkpad:
         print("[ERROR] Unable to get streammux sink pad")
         sys.exit(1)
     
     srcpad = decoder.get_static_pad("src")
-    if not srcpad:
-        print("[ERROR] Unable to get decoder source pad")
-        sys.exit(1)
-    
     if srcpad.link(sinkpad) != Gst.PadLinkReturn.OK:
         print("[ERROR] Could not link decoder to streammux")
         sys.exit(1)
     
-    # Link the main processing chain
-    # streammux -> pgie -> tracker -> sgie_plate -> sgie_lpr -> nvvidconv1 -> osd
+    # Link main processing chain
     if not streammux.link(pgie):
         print("[ERROR] Could not link streammux to pgie")
         sys.exit(1)
@@ -647,14 +811,11 @@ def main():
         sys.exit(1)
     
     # Link encoding chain
-    # Hardware: osd -> nvvidconv2 -> capsfilter -> encoder -> h264parser2 -> muxer -> sink
-    # Software: osd -> nvvidconv2 -> videoconvert_sw -> capsfilter -> encoder -> ...
     if not osd.link(nvvidconv2):
         print("[ERROR] Could not link osd to nvvidconv2")
         sys.exit(1)
     
     if use_software_encoder:
-        # Software encoder path: need videoconvert to convert from NVMM
         if not nvvidconv2.link(videoconvert_sw):
             print("[ERROR] Could not link nvvidconv2 to videoconvert_sw")
             sys.exit(1)
@@ -662,7 +823,6 @@ def main():
             print("[ERROR] Could not link videoconvert_sw to capsfilter")
             sys.exit(1)
     else:
-        # Hardware encoder path
         if not nvvidconv2.link(capsfilter):
             print("[ERROR] Could not link nvvidconv2 to capsfilter")
             sys.exit(1)
@@ -675,16 +835,23 @@ def main():
         print("[ERROR] Could not link encoder to h264parser2")
         sys.exit(1)
     
-    if not h264parser2.link(muxer):
-        print("[ERROR] Could not link h264parser2 to muxer")
-        sys.exit(1)
+    # Link output based on mode
+    if ENABLE_RTSP:
+        if not h264parser2.link(rtppay):
+            print("[ERROR] Could not link h264parser2 to rtppay")
+            sys.exit(1)
+        if not rtppay.link(sink):
+            print("[ERROR] Could not link rtppay to sink")
+            sys.exit(1)
+    else:
+        if not h264parser2.link(muxer):
+            print("[ERROR] Could not link h264parser2 to muxer")
+            sys.exit(1)
+        if not muxer.link(sink):
+            print("[ERROR] Could not link muxer to sink")
+            sys.exit(1)
     
-    if not muxer.link(sink):
-        print("[ERROR] Could not link muxer to sink")
-        sys.exit(1)
-    
-    # Add Probe for Metadata Access
-    
+    # Add Probe
     osdsinkpad = osd.get_static_pad("sink")
     if not osdsinkpad:
         print("[ERROR] Unable to get OSD sink pad")
@@ -692,9 +859,31 @@ def main():
     
     osdsinkpad.add_probe(Gst.PadProbeType.BUFFER, osd_sink_pad_buffer_probe, 0)
     
-    # Start Pipeline
+    # Start RTSP Server if enabled
+    rtsp_server = None
+    if ENABLE_RTSP:
+        rtsp_server = GstRtspServer.RTSPServer.new()
+        rtsp_server.set_service(str(RTSP_PORT))
+        
+        factory = GstRtspServer.RTSPMediaFactory.new()
+        factory.set_launch(
+            '( udpsrc name=pay0 port=5400 buffer-size=524288 '
+            'caps="application/x-rtp, media=video, clock-rate=90000, '
+            'encoding-name=H264, payload=96" )'
+        )
+        factory.set_shared(True)
+        
+        mounts = rtsp_server.get_mount_points()
+        mounts.add_factory(f"/{RTSP_STREAM_NAME}", factory)
+        rtsp_server.attach(None)
+    
+    # Print info
     print(f"[ALPR] Input:  {INPUT_VIDEO}")
-    print(f"[ALPR] Output: {OUTPUT_VIDEO}")
+    if ENABLE_RTSP:
+        print(f"[RTSP] Stream URL: rtsp://<your-ip>:{RTSP_PORT}/{RTSP_STREAM_NAME}")
+        print(f"[RTSP] To view: ffplay rtsp://localhost:{RTSP_PORT}/{RTSP_STREAM_NAME}")
+    else:
+        print(f"[ALPR] Output: {OUTPUT_VIDEO}")
     
     # Create GLib MainLoop
     loop = GLib.MainLoop()
@@ -702,7 +891,7 @@ def main():
     # Add bus watch
     bus = pipeline.get_bus()
     bus.add_signal_watch()
-    bus.connect("message", bus_call, loop)
+    bus.connect("message", bus_call_live, (loop, pipeline))
     
     # Start playing
     ret = pipeline.set_state(Gst.State.PLAYING)
@@ -710,6 +899,8 @@ def main():
         print("[ERROR] Unable to set pipeline to PLAYING state")
         sys.exit(1)
     
+    if LIVE_MODE:
+        print("[ALPR] Running in LIVE MODE (video loops indefinitely)")
     print("[ALPR] Processing... (Press Ctrl+C to stop)")
     
     try:
@@ -719,17 +910,14 @@ def main():
     except Exception as e:
         print(f"[ERROR] {e}")
     finally:
-        # Cleanup
         print("\n[CLEANUP] Stopping pipeline...")
         pipeline.set_state(Gst.State.NULL)
         
-        # Print final stats
         if frame_count > 0 and start_time:
             import time
             elapsed = time.time() - start_time
             fps = frame_count / elapsed if elapsed > 0 else 0
             print(f"[DONE] Processed {frame_count} frames in {elapsed:.2f}s (Avg FPS: {fps:.2f})")
-            print(f"[DONE] Output saved to: {OUTPUT_VIDEO}")
 
 
 if __name__ == "__main__":
