@@ -55,14 +55,13 @@ TRACKER_CONFIG = "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-a
 APP_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/deepstream_app_config.txt"
 
 # ==============================================================================
-# Live/Real-time Mode Configuration (defaults - can be overridden by args)
+# RTSP/Live Mode Configuration (defaults - can be overridden by args)
 # ==============================================================================
-# These are default values - use command line arguments to override
-LIVE_MODE = False       # --live to enable
+LIVE_MODE = False       # --live to enable (sets live-source=1 on streammux)
 ENABLE_RTSP = False     # --rtsp to enable
 RTSP_PORT = 8554
 RTSP_STREAM_NAME = "alpr-stream"
-SAVE_TO_FILE = False
+
 
 
 def parse_arguments():
@@ -74,17 +73,14 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  # Single pass, save to file (default)
+  # Save to file (default)
   python %(prog)s
   
   # Live mode with RTSP streaming
   python %(prog)s --live --rtsp
   
-  # Live mode, save to file (loops forever)
+  # Live mode, save to file
   python %(prog)s --live
-  
-  # Single pass with RTSP
-  python %(prog)s --rtsp
   
   # Custom input/output
   python %(prog)s -i /path/to/video.mp4 -o /path/to/output.mp4
@@ -96,15 +92,15 @@ Examples:
     
     # Mode options
     parser.add_argument('--live', action='store_true',
-                        help='Enable live mode (loop video indefinitely)')
+                        help='Enable live mode (sets live-source=1 on streammux)')
     parser.add_argument('--rtsp', action='store_true',
-                        help='Enable RTSP streaming output')
+                        help='Enable RTSP streaming output (instead of file)')
     
     # Input/Output options
     parser.add_argument('-i', '--input', type=str, default=None,
                         help='Input video file path')
     parser.add_argument('-o', '--output', type=str, default=None,
-                        help='Output video file path (for file mode)')
+                        help='Output video file path')
     
     # RTSP options
     parser.add_argument('--rtsp-port', type=int, default=8554,
@@ -112,23 +108,17 @@ Examples:
     parser.add_argument('--rtsp-name', type=str, default='alpr-stream',
                         help='RTSP stream name (default: alpr-stream)')
     
-    # Additional options
-    parser.add_argument('--save-file', action='store_true',
-                        help='Also save to file when using RTSP')
-    
     return parser.parse_args()
 
 
 def apply_arguments(args):
     """Apply command line arguments to global config."""
-    global LIVE_MODE, ENABLE_RTSP, RTSP_PORT, RTSP_STREAM_NAME, SAVE_TO_FILE
-    global INPUT_VIDEO, OUTPUT_VIDEO
+    global INPUT_VIDEO, OUTPUT_VIDEO, LIVE_MODE, ENABLE_RTSP, RTSP_PORT, RTSP_STREAM_NAME
     
     LIVE_MODE = args.live
     ENABLE_RTSP = args.rtsp
     RTSP_PORT = args.rtsp_port
     RTSP_STREAM_NAME = args.rtsp_name
-    SAVE_TO_FILE = args.save_file
     
     if args.input:
         INPUT_VIDEO = args.input
@@ -290,9 +280,6 @@ def cleanup_old_vehicles(current_frame, max_frames_missing=90):
         vehicle_stable_plates.pop(vehicle_id, None)
         vehicle_last_seen.pop(vehicle_id, None)
 
-
-
-
 def bus_call(bus, message, loop):
     """Handle GStreamer bus messages."""
     t = message.type
@@ -303,7 +290,6 @@ def bus_call(bus, message, loop):
         print(f"[ERROR] {err}: {debug}")
         loop.quit()
     return True
-
 
 # ==============================================================================
 # Plate-Vehicle Association Components (from plate_association module)
@@ -434,8 +420,11 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                 if display_text and len(display_text) > 0:
                     plate_meta.text_params.display_text = display_text
                     plate_meta.text_params.set_bg_clr = 1
-                    plate_meta.text_params.y_offset -= 20
-                    plate_meta.text_params.font_params.font_size = 15
+                    # Move text above the plate so actual plate is visible
+                    # Calculate position relative to plate's current location
+                    rect = plate_meta.rect_params
+                    plate_meta.text_params.x_offset = int(rect.left)
+                    plate_meta.text_params.y_offset = max(0, int(rect.top - 20))
                 
             except Exception:
                 pass
@@ -499,67 +488,6 @@ def create_encoder(element_name):
     sys.exit(1)
 
 
-def restart_pipeline(pipeline):
-    """Restart pipeline from NULL state for clean loop."""
-    pipeline.set_state(Gst.State.NULL)
-    # Wait for state change to complete
-    pipeline.get_state(Gst.CLOCK_TIME_NONE)
-    pipeline.set_state(Gst.State.PLAYING)
-    return False  # Don't repeat the timeout
-
-
-def bus_call_live(bus, message, loop_data):
-    """Handle GStreamer bus messages for live mode with looping."""
-    loop, pipeline = loop_data
-    t = message.type
-    
-    if t == Gst.MessageType.EOS:
-        if LIVE_MODE:
-            print("[LOOP] End of stream, restarting...")
-            # Schedule restart on main loop to avoid issues
-            GLib.timeout_add(100, restart_pipeline, pipeline)
-        else:
-            loop.quit()
-    elif t == Gst.MessageType.ERROR:
-        err, debug = message.parse_error()
-        print(f"[ERROR] {err}: {debug}")
-        loop.quit()
-    return True
-
-
-def start_rtsp_server(pipeline, osd):
-    """Start RTSP server for streaming output."""
-    
-    # Create RTSP server
-    server = GstRtspServer.RTSPServer.new()
-    server.set_service(str(RTSP_PORT))
-    
-    # Create factory
-    factory = GstRtspServer.RTSPMediaFactory.new()
-    
-    # For RTSP, we need to create a separate encoding pipeline
-    # that reads from the main pipeline's OSD output
-    # Using appsrc/appsink approach or tee element
-    
-    # Simpler approach: Use UDP sink and RTSP server reads from it
-    launch_str = (
-        "( udpsrc name=pay0 port=5400 caps=\"application/x-rtp, media=video, "
-        "clock-rate=90000, encoding-name=H264, payload=96\" )"
-    )
-    
-    factory.set_launch(launch_str)
-    factory.set_shared(True)
-    
-    # Get mount points and add our stream
-    mounts = server.get_mount_points()
-    mounts.add_factory(f"/{RTSP_STREAM_NAME}", factory)
-    
-    # Start server
-    server.attach(None)
-    
-    print(f"[RTSP] Server started at rtsp://localhost:{RTSP_PORT}/{RTSP_STREAM_NAME}")
-    
-    return server
 
 
 def main():
@@ -570,7 +498,7 @@ def main():
     apply_arguments(args)
     
     print("[ALPR] Starting DeepStream ALPR Pipeline...")
-    print(f"[ALPR] Mode: {'LIVE (looping)' if LIVE_MODE else 'FILE (single pass)'}")
+    print(f"[ALPR] Mode: {'LIVE' if LIVE_MODE else 'FILE'}")
     print(f"[ALPR] Output: {'RTSP streaming' if ENABLE_RTSP else 'File'}")
     
     # Change to config directory (config files use relative paths for models)
@@ -611,7 +539,6 @@ def main():
     streammux.set_property("height", CFG['muxer_height'])
     streammux.set_property("batch-size", 1)
     streammux.set_property("batched-push-timeout", CFG['muxer_batch_timeout'])
-    # For live mode, set live-source=1
     streammux.set_property("live-source", 1 if LIVE_MODE else 0)
     streammux.set_property("nvbuf-memory-type", 0)
     streammux.set_property("gpu-id", 0)
@@ -654,15 +581,12 @@ def main():
     osd.set_property("display-text", 1)
     osd.set_property("display-bbox", 1)
     osd.set_property("gpu-id", 0)
-    
-    # Tee for splitting output (RTSP + file)
-    tee = create_element("tee", "tee") if (ENABLE_RTSP and SAVE_TO_FILE) else None
-    
-    # Queue for RTSP branch
-    queue_rtsp = create_element("queue", "queue-rtsp") if ENABLE_RTSP else None
-    
-    # Queue for file branch
-    queue_file = create_element("queue", "queue-file") if (ENABLE_RTSP and SAVE_TO_FILE) else None
+    # Text styling (applies to all labels)
+    try:
+        osd.set_property("text-size", 15)
+        osd.set_property("font", "Serif")
+    except Exception:
+        pass  # Properties might not exist in all versions
     
     # Video Converter (before encoder)
     nvvidconv2 = create_element("nvvideoconvert", "converter2")
@@ -699,7 +623,7 @@ def main():
     # H264 Parser
     h264parser2 = create_element("h264parse", "h264-parser2")
     
-    # Create sink based on mode
+    # Create sink based on mode (RTSP or File)
     if ENABLE_RTSP:
         # RTP payload for RTSP
         rtppay = create_element("rtph264pay", "rtppay")
@@ -712,6 +636,7 @@ def main():
         sink.set_property("port", 5400)
         sink.set_property("sync", 1 if LIVE_MODE else 0)
         sink.set_property("async", 0)
+        muxer = None  # Not used in RTSP mode
     else:
         # MP4 Muxer and File Sink
         muxer = create_element("qtmux", "muxer")
@@ -719,6 +644,7 @@ def main():
         sink.set_property("location", OUTPUT_VIDEO)
         sink.set_property("sync", 0)
         sink.set_property("async", 0)
+        rtppay = None  # Not used in file mode
     
     # Add Elements to Pipeline
     pipeline.add(source)
@@ -741,8 +667,6 @@ def main():
     pipeline.add(h264parser2)
     
     if ENABLE_RTSP:
-        if queue_rtsp:
-            pipeline.add(queue_rtsp)
         pipeline.add(rtppay)
         pipeline.add(sink)
     else:
@@ -860,7 +784,6 @@ def main():
     osdsinkpad.add_probe(Gst.PadProbeType.BUFFER, osd_sink_pad_buffer_probe, 0)
     
     # Start RTSP Server if enabled
-    rtsp_server = None
     if ENABLE_RTSP:
         rtsp_server = GstRtspServer.RTSPServer.new()
         rtsp_server.set_service(str(RTSP_PORT))
@@ -891,7 +814,7 @@ def main():
     # Add bus watch
     bus = pipeline.get_bus()
     bus.add_signal_watch()
-    bus.connect("message", bus_call_live, (loop, pipeline))
+    bus.connect("message", bus_call, loop)
     
     # Start playing
     ret = pipeline.set_state(Gst.State.PLAYING)
@@ -899,8 +822,6 @@ def main():
         print("[ERROR] Unable to set pipeline to PLAYING state")
         sys.exit(1)
     
-    if LIVE_MODE:
-        print("[ALPR] Running in LIVE MODE (video loops indefinitely)")
     print("[ALPR] Processing... (Press Ctrl+C to stop)")
     
     try:
