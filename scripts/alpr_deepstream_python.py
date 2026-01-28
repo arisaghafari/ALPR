@@ -2,10 +2,6 @@ import sys
 import os
 import cv2
 
-# ==============================================================================
-# Headless Mode Setup (for Docker/SSH without display)
-# This MUST be done BEFORE importing GStreamer
-# ==============================================================================
 if 'DISPLAY' in os.environ:
     del os.environ['DISPLAY']
 
@@ -33,7 +29,7 @@ import pyds
 from pathlib import Path
 
 # Import plate-vehicle association modules
-from plate_association import PlateVehicleScorer, SpatialGrid
+from plate_association import PlateVehicleScorer, SpatialGrid, SkipLogicManager, create_pre_sgie_probe
 
 # ==============================================================================
 # Configuration - Adjust paths as needed
@@ -62,7 +58,10 @@ ENABLE_RTSP = False     # --rtsp to enable
 RTSP_PORT = 8554
 RTSP_STREAM_NAME = "alpr-stream"
 
-
+# ==============================================================================
+# GPU Optimization Control
+# ==============================================================================
+ENABLE_SKIP_LOGIC = True  # --no-skip to disable for comparison
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -108,23 +107,27 @@ Examples:
     parser.add_argument('--rtsp-name', type=str, default='alpr-stream',
                         help='RTSP stream name (default: alpr-stream)')
     
+    # Optimization options
+    parser.add_argument('--no-skip', action='store_true',
+                        help='Disable "Read Once, Skip Later" optimization (for comparison)')
+    
     return parser.parse_args()
-
 
 def apply_arguments(args):
     """Apply command line arguments to global config."""
     global INPUT_VIDEO, OUTPUT_VIDEO, LIVE_MODE, ENABLE_RTSP, RTSP_PORT, RTSP_STREAM_NAME
+    global ENABLE_SKIP_LOGIC
     
     LIVE_MODE = args.live
     ENABLE_RTSP = args.rtsp
     RTSP_PORT = args.rtsp_port
     RTSP_STREAM_NAME = args.rtsp_name
+    ENABLE_SKIP_LOGIC = not args.no_skip  # --no-skip disables it
     
     if args.input:
         INPUT_VIDEO = args.input
     if args.output:
         OUTPUT_VIDEO = args.output
-
 
 def parse_app_config(config_path):
     """Parse deepstream_app_config.txt to extract settings."""
@@ -185,10 +188,8 @@ def get_config_values():
     
     return values
 
-
 # Load config values from deepstream_app_config.txt
 CFG = get_config_values()
-
 
 # ==============================================================================
 # Global Variables for Performance Measurement
@@ -204,6 +205,7 @@ from collections import defaultdict, Counter
 # Configuration for stabilization
 PLATE_HISTORY_SIZE = 15       # Number of frames to keep history
 MIN_VOTES_FOR_STABLE = 5      # Minimum votes needed to consider a plate "stable"
+MIN_PLATE_LENGTH = 5          # Minimum plate text length to be valid
 
 # Store plate recognition history PER VEHICLE (using vehicle's track ID)
 # Key: vehicle_track_id (from parent object)
@@ -217,6 +219,12 @@ vehicle_stable_plates = {}
 
 # Track last frame each vehicle was seen (for cleanup)
 vehicle_last_seen = {}
+
+# CUMULATIVE stats (not affected by cleanup)
+# Key: vehicle_id, Value: plate_text (ensures one plate per vehicle)
+total_plates_by_vehicle = {}  # Stable plates (high confidence)
+total_partial_plates = {}     # Best-effort plates (didn't reach stable threshold)
+total_vehicles_completed_ever = set()  # All vehicle IDs ever completed
 
 def get_stable_plate_for_vehicle(vehicle_id, new_plate_text, current_frame):
     """
@@ -235,8 +243,8 @@ def get_stable_plate_for_vehicle(vehicle_id, new_plate_text, current_frame):
     # Update last seen frame
     vehicle_last_seen[vehicle_id] = current_frame
     
-    # Add new recognition to this vehicle's history
-    if new_plate_text:
+    # Add new recognition to this vehicle's history (only if valid length)
+    if new_plate_text and len(new_plate_text) >= MIN_PLATE_LENGTH:
         vehicle_plate_history[vehicle_id].append(new_plate_text)
         
         # Keep only recent history
@@ -253,9 +261,11 @@ def get_stable_plate_for_vehicle(vehicle_id, new_plate_text, current_frame):
     counter = Counter(history)
     most_common_plate, count = counter.most_common(1)[0]
     
-    # Only update stable plate if we have enough consistent votes
-    if count >= MIN_VOTES_FOR_STABLE:
+    # Only update stable plate if we have enough consistent votes and valid length
+    if count >= MIN_VOTES_FOR_STABLE and len(most_common_plate) >= MIN_PLATE_LENGTH:
         vehicle_stable_plates[vehicle_id] = most_common_plate
+        # Track cumulative stats (one plate per vehicle - overwrites if changed)
+        total_plates_by_vehicle[vehicle_id] = most_common_plate
         return most_common_plate
     elif vehicle_id in vehicle_stable_plates:
         # Keep previous stable plate if not enough new votes
@@ -265,8 +275,10 @@ def get_stable_plate_for_vehicle(vehicle_id, new_plate_text, current_frame):
         return most_common_plate
 
 def cleanup_old_vehicles(current_frame, max_frames_missing=90):
-    """Remove history for vehicles that haven't been seen recently."""
+    """Remove history for vehicles that haven't been seen recently.
+    Saves partial plates for vehicles that didn't reach stable threshold."""
     global vehicle_plate_history, vehicle_stable_plates, vehicle_last_seen
+    global total_partial_plates
     
     # Find vehicles not seen recently
     vehicles_to_remove = []
@@ -274,8 +286,18 @@ def cleanup_old_vehicles(current_frame, max_frames_missing=90):
         if current_frame - last_frame > max_frames_missing:
             vehicles_to_remove.append(vehicle_id)
     
-    # Remove old vehicle data
+    # Remove old vehicle data, but save partial plates
     for vehicle_id in vehicles_to_remove:
+        # If vehicle didn't reach stable threshold, save best-effort plate
+        if vehicle_id not in total_plates_by_vehicle:
+            history = vehicle_plate_history.get(vehicle_id, [])
+            if history:
+                # Get most common plate from history (even if below threshold)
+                counter = Counter(history)
+                best_plate, count = counter.most_common(1)[0]
+                if len(best_plate) >= MIN_PLATE_LENGTH:
+                    total_partial_plates[vehicle_id] = (best_plate, count)
+        
         vehicle_plate_history.pop(vehicle_id, None)
         vehicle_stable_plates.pop(vehicle_id, None)
         vehicle_last_seen.pop(vehicle_id, None)
@@ -297,14 +319,31 @@ def bus_call(bus, message, loop):
 spatial_grid = SpatialGrid(cell_size=64)
 plate_scorer = PlateVehicleScorer()
 
+# ==============================================================================
+# READ ONCE, SKIP LATER - GPU Optimization (from plate_association.skip_logic)
+# ==============================================================================
+# NOTE: min_confident_readings should be >= MIN_VOTES_FOR_STABLE (5)
+# so that stable plate is stored BEFORE marking vehicle as completed
+skip_manager = SkipLogicManager(
+    min_confident_readings=6,       # Must be > MIN_VOTES_FOR_STABLE (5)
+    min_plate_length=MIN_PLATE_LENGTH,  # Same as stabilization check
+    max_frames_missing=90           # Cleanup threshold
+)
+# Note: SGIE min size (50) is configured in config_infer_secondary_yolo11.txt
+
+# Create the pre-SGIE probe function
+pre_sgie_probe = create_pre_sgie_probe(skip_manager)
+
 
 def osd_sink_pad_buffer_probe(pad, info, u_data):
     """
     Probe function using modular plate-vehicle association.
     Uses SpatialGrid for O(1) lookup and PlateVehicleScorer for multi-factor matching.
     
-    IMPORTANT: Only READ metadata, avoid modifying display_text to prevent CUDA errors.
-    The OSD will use default text from the inference elements.
+    Integrates with "Read Once, Skip Later" optimization:
+    - Restores bboxes that were shrunk by pre_sgie_probe
+    - Marks vehicles as completed after confident readings
+    - Displays stored plates for completed vehicles
     """
     global frame_count, start_time
     import time
@@ -326,6 +365,7 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
     while l_frame is not None:
         try:
             frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
+            frame_num = frame_meta.frame_num
         except StopIteration:
             break
         
@@ -333,7 +373,7 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
         spatial_grid.clear()
         plates_to_process = []
         
-        # Single pass: build spatial grid and collect plates
+        # Single pass: build spatial grid, collect plates, restore completed bboxes
         l_obj = frame_meta.obj_meta_list
         while l_obj is not None:
             try:
@@ -341,9 +381,36 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                 
                 # Vehicles (gie-unique-id=1): Add to spatial grid
                 if obj_meta.unique_component_id == 1:
-                    obj_meta.text_params.display_text = " "    # Space (not empty string)
-                    obj_meta.text_params.set_bg_clr = 0        # Hide black background
-                    spatial_grid.add_vehicle(obj_meta.object_id, obj_meta.rect_params)
+                    vehicle_id = obj_meta.object_id
+                    
+                    # Skip logic handling (only when enabled)
+                    if ENABLE_SKIP_LOGIC:
+                        # Restore bbox if it was shrunk by pre_sgie_probe
+                        skip_manager.restore_bbox(obj_meta, frame_num)
+                        
+                        # For COMPLETED vehicles: display ID + stored plate
+                        if skip_manager.is_completed(vehicle_id):
+                            stored_plate = vehicle_stable_plates.get(vehicle_id, "")
+                            if stored_plate:
+                                obj_meta.text_params.display_text = f"#{vehicle_id} {stored_plate}"
+                                obj_meta.text_params.set_bg_clr = 1
+                                obj_meta.text_params.text_bg_clr.red = 0.0
+                                obj_meta.text_params.text_bg_clr.green = 0.6
+                                obj_meta.text_params.text_bg_clr.blue = 0.0
+                                obj_meta.text_params.text_bg_clr.alpha = 0.8
+                            else:
+                                obj_meta.text_params.display_text = f"#{vehicle_id}"
+                                obj_meta.text_params.set_bg_clr = 1
+                        else:
+                            # Not completed yet - show just the ID
+                            obj_meta.text_params.display_text = f"#{vehicle_id}"
+                            obj_meta.text_params.set_bg_clr = 1
+                    else:
+                        # Skip logic disabled - show vehicle ID
+                        obj_meta.text_params.display_text = f"#{vehicle_id}"
+                        obj_meta.text_params.set_bg_clr = 1
+                    
+                    spatial_grid.add_vehicle(vehicle_id, obj_meta.rect_params)
                 
                 # Plates (gie-unique-id=2): Collect for processing
                 elif obj_meta.unique_component_id == 2:
@@ -384,47 +451,54 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                             plate_rect, candidates, min_score=0.3
                         )
                 
-                # Get LPR text from classifier (gie-unique-id=3)
-                plate_text = None
-                l_cls = plate_meta.classifier_meta_list
-                while l_cls is not None:
-                    try:
-                        cls_meta = pyds.NvDsClassifierMeta.cast(l_cls.data)
-                        if cls_meta.unique_component_id == 3:
-                            l_lbl = cls_meta.label_info_list
-                            if l_lbl is not None:
-                                try:
-                                    lbl = pyds.NvDsLabelInfo.cast(l_lbl.data)
-                                    if lbl.result_label:
-                                        plate_text = lbl.result_label
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-                    try:
-                        l_cls = l_cls.next
-                    except StopIteration:
-                        break
-                
-                # Get stable plate text using majority voting
-                display_text = None
-                if parent_id > 0 and plate_text:
-                    stable = get_stable_plate_for_vehicle(parent_id, plate_text, frame_count)
-                    if stable:
-                        display_text = stable
-                elif plate_text:
-                    display_text = plate_text
+                # Check if this vehicle is already completed (plate already known)
+                # Only applies when skip logic is enabled
+                if ENABLE_SKIP_LOGIC and parent_id > 0 and skip_manager.is_completed(parent_id):
+                    # Use stored stable plate - no new processing needed
+                    display_text = vehicle_stable_plates.get(parent_id, "")
+                else:
+                    # Get LPR text from classifier (gie-unique-id=3)
+                    plate_text = None
+                    l_cls = plate_meta.classifier_meta_list
+                    while l_cls is not None:
+                        try:
+                            cls_meta = pyds.NvDsClassifierMeta.cast(l_cls.data)
+                            if cls_meta.unique_component_id == 3:
+                                l_lbl = cls_meta.label_info_list
+                                if l_lbl is not None:
+                                    try:
+                                        lbl = pyds.NvDsLabelInfo.cast(l_lbl.data)
+                                        if lbl.result_label:
+                                            plate_text = lbl.result_label
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
+                        try:
+                            l_cls = l_cls.next
+                        except StopIteration:
+                            break
+                    
+                    # Get stable plate text using majority voting
+                    display_text = None
+                    if parent_id > 0 and plate_text:
+                        stable = get_stable_plate_for_vehicle(parent_id, plate_text, frame_count)
+                        if stable:
+                            display_text = stable
+                            # Only mark as completed if stable plate is stored AND skip logic enabled
+                            if ENABLE_SKIP_LOGIC and parent_id in vehicle_stable_plates:
+                                newly_completed = skip_manager.record_reading(parent_id, stable, frame_count)
+                                if newly_completed:
+                                    total_vehicles_completed_ever.add(parent_id)
+                    elif plate_text:
+                        display_text = plate_text
                 
                 # SAFE: Only set display_text if we have a valid non-empty string
                 # NEVER use empty string "" - it causes CUDA memory errors
+                # NEVER modify x_offset/y_offset - causes CUDA crashes
                 if display_text and len(display_text) > 0:
                     plate_meta.text_params.display_text = display_text
                     plate_meta.text_params.set_bg_clr = 1
-                    # Move text above the plate so actual plate is visible
-                    # Calculate position relative to plate's current location
-                    rect = plate_meta.rect_params
-                    plate_meta.text_params.x_offset = int(rect.left)
-                    plate_meta.text_params.y_offset = max(0, int(rect.top - 20))
                 
             except Exception:
                 pass
@@ -432,7 +506,14 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
         # Cleanup old tracks periodically
         if frame_count % 150 == 0:
             cleanup_old_vehicles(frame_count)
-            print(f"[Info]{frame_count%total_frames}/{total_frames}")
+            # Show cumulative stats (unique plates = unique vehicles with plates)
+            total_plates = len(total_plates_by_vehicle)
+            if ENABLE_SKIP_LOGIC:
+                skip_manager.cleanup(frame_count)
+                total_completed = len(total_vehicles_completed_ever)
+                print(f"[Info]{frame_count%total_frames}/{total_frames} | Plates found: {total_plates} | Vehicles completed: {total_completed}")
+            else:
+                print(f"[Info]{frame_count%total_frames}/{total_frames} | Plates found: {total_plates}")
         
         try:
             l_frame = l_frame.next
@@ -775,7 +856,17 @@ def main():
             print("[ERROR] Could not link muxer to sink")
             sys.exit(1)
     
-    # Add Probe
+    # Add Pre-SGIE Probe (for "Read Once, Skip Later" optimization)
+    # This probe runs BEFORE secondary GIE to skip already-completed vehicles
+    if ENABLE_SKIP_LOGIC:
+        tracker_srcpad = tracker.get_static_pad("src")
+        if tracker_srcpad:
+            tracker_srcpad.add_probe(Gst.PadProbeType.BUFFER, pre_sgie_probe, 0)
+            print("[ALPR] GPU optimization ENABLED: Read Once, Skip Later")
+    else:
+        print("[ALPR] GPU optimization DISABLED (--no-skip mode for comparison)")
+    
+    # Add Main Probe (after OSD, for display and completion tracking)
     osdsinkpad = osd.get_static_pad("sink")
     if not osdsinkpad:
         print("[ERROR] Unable to get OSD sink pad")
@@ -838,7 +929,53 @@ def main():
             import time
             elapsed = time.time() - start_time
             fps = frame_count / elapsed if elapsed > 0 else 0
-            print(f"[DONE] Processed {frame_count} frames in {elapsed:.2f}s (Avg FPS: {fps:.2f})")
+            
+            print("\n" + "="*60)
+            print("PERFORMANCE SUMMARY")
+            print("="*60)
+            print(f"Total frames:     {frame_count}")
+            print(f"Processing time:  {elapsed:.2f}s")
+            print(f"Average FPS:      {fps:.2f}")
+            
+            # Count totals
+            stable_count = len(total_plates_by_vehicle)
+            partial_count = len(total_partial_plates)
+            
+            print(f"Stable plates (high confidence):  {stable_count}")
+            print(f"Partial plates (brief appearance): {partial_count}")
+            print(f"Total unique vehicles with plates: {stable_count + partial_count}")
+            
+            # Show stable plates (high confidence)
+            if total_plates_by_vehicle:
+                print("-"*60)
+                print("STABLE PLATES (>= 5 consistent readings):")
+                for vehicle_id, plate_text in sorted(total_plates_by_vehicle.items()):
+                    print(f"  Vehicle #{vehicle_id}: {plate_text}")
+            
+            # Show partial plates (brief appearances)
+            if total_partial_plates:
+                print("-"*60)
+                print("PARTIAL PLATES (brief appearance, lower confidence):")
+                for vehicle_id, (plate_text, count) in sorted(total_partial_plates.items()):
+                    print(f"  Vehicle #{vehicle_id}: {plate_text} ({count} readings)")
+            
+            if ENABLE_SKIP_LOGIC:
+                stats = skip_manager.get_stats()
+                print("-"*60)
+                print("GPU OPTIMIZATION (Read Once, Skip Later): ENABLED")
+                print(f"  Vehicles completed (total): {len(total_vehicles_completed_ever)}")
+                print(f"  Total skipped:              {stats['total_skipped']}")
+                print(f"  Total processed:            {stats['total_processed']}")
+                if stats['total_skipped'] + stats['total_processed'] > 0:
+                    print(f"  Skip ratio:                 {stats['skip_ratio']:.1%}")
+                print("-"*60)
+                print("To compare without optimization, run with: --no-skip")
+            else:
+                print("-"*60)
+                print("GPU OPTIMIZATION: DISABLED (comparison mode)")
+                print("-"*60)
+                print("To enable optimization, run without --no-skip flag")
+            print("="*60)
 
 
 if __name__ == "__main__":
