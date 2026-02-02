@@ -1,0 +1,10 @@
+Car
+Car w. trailer
+Bus
+Light Truck
+Heavy Truck
+Truck w. trailer
+Moto
+Van
+Others
+Articulated Truck

@@ -16,8 +16,8 @@ network-type=1
 network-mode=2
 process-mode=2
 
-classifier-threshold=0.5
-interval=2
+classifier-threshold=0.1
+interval=0
 
 # --- PIPELINE CONNECTION ---
 gie-unique-id=3
@@ -25,8 +25,8 @@ operate-on-gie-id=2
 operate-on-class-ids=0
 
 # --- INPUT SIZE ---
-input-object-min-width=50
-input-object-min-height=12
+input-object-min-width=32
+input-object-min-height=8
 #maintain-aspect-ratio=1
 maintain-aspect-ratio=0
 batch-size=8
