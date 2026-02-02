@@ -36,11 +36,11 @@ from plate_association import PlateVehicleScorer, SpatialGrid, SkipLogicManager,
 # ==============================================================================
 CONFIG_DIR = "/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project"
 
-INPUT_VIDEO = f"{CONFIG_DIR}/sample.mp4"
-OUTPUT_VIDEO = f"{CONFIG_DIR}/output_video_python.mp4"
+INPUT_VIDEO = f"{CONFIG_DIR}/input_videos/video_3.mp4"
+OUTPUT_VIDEO = f"{CONFIG_DIR}/output_videos/output_video_python.mp4"
 
 cap = cv2.VideoCapture(INPUT_VIDEO)
-total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+TOTAL_FRAME = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
 PGIE_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/config_infer_primary_yolo11.txt"
 SGIE_PLATE_DETECTOR_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/config_infer_secondary_yolo11.txt"
@@ -116,7 +116,7 @@ Examples:
 def apply_arguments(args):
     """Apply command line arguments to global config."""
     global INPUT_VIDEO, OUTPUT_VIDEO, LIVE_MODE, ENABLE_RTSP, RTSP_PORT, RTSP_STREAM_NAME
-    global ENABLE_SKIP_LOGIC
+    global ENABLE_SKIP_LOGIC, TOTAL_FRAME
     
     LIVE_MODE = args.live
     ENABLE_RTSP = args.rtsp
@@ -126,6 +126,8 @@ def apply_arguments(args):
     
     if args.input:
         INPUT_VIDEO = args.input
+        cap = cv2.VideoCapture(INPUT_VIDEO)
+        TOTAL_FRAME = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if args.output:
         OUTPUT_VIDEO = args.output
 
@@ -159,10 +161,12 @@ def get_config_values():
     config = parse_app_config(APP_CONFIG)
     
     # Default values (fallback if config parsing fails)
+    # Updated to match current deepstream_app_config.txt
     values = {
-        'muxer_width': 1280,
-        'muxer_height': 720,
+        'muxer_width': 1920,
+        'muxer_height': 1080,
         'muxer_batch_timeout': 40000,
+        'enable_padding': 1,  # Preserve aspect ratio
         'tracker_width': 640,
         'tracker_height': 384,
         'bitrate': 4000000,
@@ -172,9 +176,10 @@ def get_config_values():
     if config:
         # Read from streammux section
         if 'streammux' in config:
-            values['muxer_width'] = int(config['streammux'].get('width', 1280))
-            values['muxer_height'] = int(config['streammux'].get('height', 720))
+            values['muxer_width'] = int(config['streammux'].get('width', 1920))
+            values['muxer_height'] = int(config['streammux'].get('height', 1080))
             values['muxer_batch_timeout'] = int(config['streammux'].get('batched-push-timeout', 40000))
+            values['enable_padding'] = int(config['streammux'].get('enable-padding', 1))
         
         # Read from tracker section
         if 'tracker' in config:
@@ -216,6 +221,18 @@ vehicle_plate_history = defaultdict(list)
 # Key: vehicle_track_id
 # Value: stable plate text for this vehicle
 vehicle_stable_plates = {}
+
+# LOCKED plate text - once set, never changes (for accurate completion)
+# Key: vehicle_track_id, Value: locked plate text
+vehicle_locked_plates = {}
+
+# Completion count - only counts exact matches to locked text
+# Key: vehicle_track_id, Value: count of readings matching locked text
+vehicle_completion_count = defaultdict(int)
+
+# Track TOTAL readings per vehicle (for statistics)
+# Key: vehicle_track_id, Value: total count of plate readings
+vehicle_total_readings = defaultdict(int)
 
 # Track last frame each vehicle was seen (for cleanup)
 vehicle_last_seen = {}
@@ -302,6 +319,31 @@ def cleanup_old_vehicles(current_frame, max_frames_missing=90):
         vehicle_stable_plates.pop(vehicle_id, None)
         vehicle_last_seen.pop(vehicle_id, None)
 
+def final_cleanup_save_all():
+    """Save ALL remaining vehicles as partial plates at end of video.
+    This ensures no vehicles are lost when the video ends."""
+    global vehicle_plate_history, total_plates_by_vehicle, total_partial_plates
+    
+    saved_count = 0
+    for vehicle_id, history in vehicle_plate_history.items():
+        # Skip if already saved as stable plate
+        if vehicle_id in total_plates_by_vehicle:
+            continue
+        
+        # Skip if already saved as partial plate
+        if vehicle_id in total_partial_plates:
+            continue
+        
+        if history:
+            counter = Counter(history)
+            best_plate, count = counter.most_common(1)[0]
+            if len(best_plate) >= MIN_PLATE_LENGTH:
+                total_partial_plates[vehicle_id] = (best_plate, count)
+                saved_count += 1
+    
+    if saved_count > 0:
+        print(f"[FINAL] Saved {saved_count} remaining vehicles as partial plates")
+
 def bus_call(bus, message, loop):
     """Handle GStreamer bus messages."""
     t = message.type
@@ -322,10 +364,10 @@ plate_scorer = PlateVehicleScorer()
 # ==============================================================================
 # READ ONCE, SKIP LATER - GPU Optimization (from plate_association.skip_logic)
 # ==============================================================================
-# NOTE: min_confident_readings should be >= MIN_VOTES_FOR_STABLE (5)
-# so that stable plate is stored BEFORE marking vehicle as completed
+# NOTE: min_confident_readings should be >= MIN_VOTES_FOR_STABLE
+# Stable = 5 consistent readings, Completed = stable + 4 more confirmations
 skip_manager = SkipLogicManager(
-    min_confident_readings=6,       # Must be > MIN_VOTES_FOR_STABLE (5)
+    min_confident_readings=4,       # Additional readings needed AFTER stable (total: 5+4=9)
     min_plate_length=MIN_PLATE_LENGTH,  # Same as stabilization check
     max_frames_missing=90           # Cleanup threshold
 )
@@ -388,9 +430,10 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                         # Restore bbox if it was shrunk by pre_sgie_probe
                         skip_manager.restore_bbox(obj_meta, frame_num)
                         
-                        # For COMPLETED vehicles: display ID + stored plate
+                        # For COMPLETED vehicles: GREEN background + locked plate
                         if skip_manager.is_completed(vehicle_id):
-                            stored_plate = vehicle_stable_plates.get(vehicle_id, "")
+                            # Use LOCKED plate (confirmed text) for completed vehicles
+                            stored_plate = vehicle_locked_plates.get(vehicle_id, vehicle_stable_plates.get(vehicle_id, ""))
                             if stored_plate:
                                 obj_meta.text_params.display_text = f"#{vehicle_id} {stored_plate}"
                                 obj_meta.text_params.set_bg_clr = 1
@@ -402,7 +445,7 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                                 obj_meta.text_params.display_text = f"#{vehicle_id}"
                                 obj_meta.text_params.set_bg_clr = 1
                         else:
-                            # Not completed yet - show just the ID
+                            # Not stable yet - show just the ID
                             obj_meta.text_params.display_text = f"#{vehicle_id}"
                             obj_meta.text_params.set_bg_clr = 1
                     else:
@@ -430,14 +473,22 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
         for plate_meta in plates_to_process:
             try:
                 # Try parent metadata first (fastest path)
-                parent_id = 0
+                # Use -1 as "no match" sentinel (0 is a valid tracker ID!)
+                parent_id = -1
+                parent_source = "none"
+                
                 if plate_meta.parent:
-                    parent_id = plate_meta.parent.object_id
-                    if parent_id == 18446744073709551615:  # Invalid UINT64_MAX
-                        parent_id = 0
+                    try:
+                        parent_obj = pyds.NvDsObjectMeta.cast(plate_meta.parent)
+                        raw_parent_id = parent_obj.object_id
+                        if raw_parent_id != 18446744073709551615:  # Valid ID
+                            parent_id = raw_parent_id
+                            parent_source = "parent_meta"
+                    except Exception:
+                        pass
                 
                 # Fallback: Use spatial grid + multi-factor scoring
-                if parent_id == 0:
+                if parent_id == -1:  # No match from DeepStream parent
                     plate_rect = plate_meta.rect_params
                     plate_cx = plate_rect.left + plate_rect.width / 2
                     plate_cy = plate_rect.top + plate_rect.height / 2
@@ -448,12 +499,13 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                     # Use multi-factor scoring to find best match
                     if candidates:
                         parent_id, score = plate_scorer.find_best_vehicle(
-                            plate_rect, candidates, min_score=0.3
+                            plate_rect, candidates, min_score=0.1
                         )
+                        if score > 0:  # Check score, not ID (ID 0 is valid!)
+                            parent_source = "spatial_match"
                 
                 # Check if this vehicle is already completed (plate already known)
-                # Only applies when skip logic is enabled
-                if ENABLE_SKIP_LOGIC and parent_id > 0 and skip_manager.is_completed(parent_id):
+                if ENABLE_SKIP_LOGIC and parent_id >= 0 and skip_manager.is_completed(parent_id):
                     # Use stored stable plate - no new processing needed
                     display_text = vehicle_stable_plates.get(parent_id, "")
                 else:
@@ -481,17 +533,48 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                     
                     # Get stable plate text using majority voting
                     display_text = None
-                    if parent_id > 0 and plate_text:
-                        stable = get_stable_plate_for_vehicle(parent_id, plate_text, frame_count)
-                        if stable:
-                            display_text = stable
-                            # Only mark as completed if stable plate is stored AND skip logic enabled
-                            if ENABLE_SKIP_LOGIC and parent_id in vehicle_stable_plates:
-                                newly_completed = skip_manager.record_reading(parent_id, stable, frame_count)
-                                if newly_completed:
-                                    total_vehicles_completed_ever.add(parent_id)
-                    elif plate_text:
-                        display_text = plate_text
+                    if plate_text:
+                        # Only track plates that have a valid vehicle association
+                        # This prevents the same plate from getting different random IDs each frame
+                        tracking_id = parent_id
+                        
+                        if tracking_id >= 0 and tracking_id != 18446744073709551615 and tracking_id < 1000:
+                            # Valid tracker ID (0 is valid!) - track with majority voting using vehicle ID
+                            # Count total readings for this vehicle
+                            vehicle_total_readings[tracking_id] += 1
+                            
+                            stable = get_stable_plate_for_vehicle(tracking_id, plate_text, frame_count)
+                            if stable:
+                                display_text = stable
+                                
+                                # LOCKED PLATE LOGIC for accurate completion
+                                if ENABLE_SKIP_LOGIC and tracking_id in vehicle_stable_plates:
+                                    # Step 1: Lock the plate text (only once, never changes)
+                                    if tracking_id not in vehicle_locked_plates:
+                                        vehicle_locked_plates[tracking_id] = stable
+                                    
+                                    locked_text = vehicle_locked_plates[tracking_id]
+                                    
+                                    # Step 2: Only count if current reading EXACTLY matches locked text
+                                    if plate_text == locked_text:
+                                        vehicle_completion_count[tracking_id] += 1
+                                        
+                                        # Step 3: Mark as completed when enough exact matches
+                                        if vehicle_completion_count[tracking_id] >= skip_manager.min_confident_readings:
+                                            if tracking_id not in total_vehicles_completed_ever:
+                                                skip_manager.completed_vehicles.add(tracking_id)
+                                                total_vehicles_completed_ever.add(tracking_id)
+                            else:
+                                display_text = plate_text
+                        else:
+                            # No valid vehicle association - track by plate TEXT instead
+                            # Use a hash of the plate text as a pseudo-ID (consistent across frames)
+                            text_based_id = hash(plate_text) % 100000 + 100000  # 100000-199999 range
+                            stable = get_stable_plate_for_vehicle(text_based_id, plate_text, frame_count)
+                            if stable:
+                                display_text = stable
+                            else:
+                                display_text = plate_text
                 
                 # SAFE: Only set display_text if we have a valid non-empty string
                 # NEVER use empty string "" - it causes CUDA memory errors
@@ -503,17 +586,17 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
             except Exception:
                 pass
         
-        # Cleanup old tracks periodically
-        if frame_count % 150 == 0:
+        # Cleanup old tracks periodically (saves partial plates for vehicles that left)
+        if frame_count % 60 == 0:
             cleanup_old_vehicles(frame_count)
             # Show cumulative stats (unique plates = unique vehicles with plates)
             total_plates = len(total_plates_by_vehicle)
             if ENABLE_SKIP_LOGIC:
                 skip_manager.cleanup(frame_count)
                 total_completed = len(total_vehicles_completed_ever)
-                print(f"[Info]{frame_count%total_frames}/{total_frames} | Plates found: {total_plates} | Vehicles completed: {total_completed}")
+                print(f"[Info]{frame_count%TOTAL_FRAME}/{TOTAL_FRAME} | Plates found: {total_plates} | Vehicles completed: {total_completed}")
             else:
-                print(f"[Info]{frame_count%total_frames}/{total_frames} | Plates found: {total_plates}")
+                print(f"[Info]{frame_count%TOTAL_FRAME}/{TOTAL_FRAME} | Plates found: {total_plates}")
         
         try:
             l_frame = l_frame.next
@@ -581,6 +664,7 @@ def main():
     print("[ALPR] Starting DeepStream ALPR Pipeline...")
     print(f"[ALPR] Mode: {'LIVE' if LIVE_MODE else 'FILE'}")
     print(f"[ALPR] Output: {'RTSP streaming' if ENABLE_RTSP else 'File'}")
+    print(f"[ALPR] Resolution: {CFG['muxer_width']}x{CFG['muxer_height']} (padding={'ON' if CFG['enable_padding'] else 'OFF'})")
     
     # Change to config directory (config files use relative paths for models)
     if os.path.exists(CONFIG_DIR):
@@ -624,7 +708,8 @@ def main():
     streammux.set_property("nvbuf-memory-type", 0)
     streammux.set_property("gpu-id", 0)
     try:
-        streammux.set_property("enable-padding", 0)
+        # Enable padding to preserve aspect ratio (adds black bars if needed)
+        streammux.set_property("enable-padding", CFG['enable_padding'])
     except:
         pass
     
@@ -930,6 +1015,10 @@ def main():
             elapsed = time.time() - start_time
             fps = frame_count / elapsed if elapsed > 0 else 0
             
+            # FINAL CLEANUP: Save all remaining vehicles as partial plates
+            # This ensures vehicles still in frame at end of video are captured
+            final_cleanup_save_all()
+            
             print("\n" + "="*60)
             print("PERFORMANCE SUMMARY")
             print("="*60)
@@ -937,27 +1026,72 @@ def main():
             print(f"Processing time:  {elapsed:.2f}s")
             print(f"Average FPS:      {fps:.2f}")
             
-            # Count totals
-            stable_count = len(total_plates_by_vehicle)
-            partial_count = len(total_partial_plates)
+            # Count totals - consolidate by plate TEXT to handle tracker issues
+            # Group plates by text
+            all_plate_texts = set()
+            for plate_text in total_plates_by_vehicle.values():
+                all_plate_texts.add(plate_text)
+            for vehicle_id, (plate_text, count) in total_partial_plates.items():
+                all_plate_texts.add(plate_text)
             
-            print(f"Stable plates (high confidence):  {stable_count}")
-            print(f"Partial plates (brief appearance): {partial_count}")
-            print(f"Total unique vehicles with plates: {stable_count + partial_count}")
+            stable_text_count = len(set(total_plates_by_vehicle.values()))
+            partial_texts = set(pt for pt, c in total_partial_plates.values())
+            # Only count partial texts that aren't also in stable
+            partial_only = partial_texts - set(total_plates_by_vehicle.values())
             
-            # Show stable plates (high confidence)
-            if total_plates_by_vehicle:
+            print(f"Stable plates (high confidence):   {stable_text_count}")
+            print(f"Partial plates (brief appearance): {len(partial_only)}")
+            print(f"Total unique plate texts:          {len(all_plate_texts)}")
+            
+            # Consolidate plates by TEXT (not vehicle ID) to handle tracker issues
+            # Group stable plates by text
+            stable_by_text = {}
+            for vehicle_id, plate_text in total_plates_by_vehicle.items():
+                if plate_text not in stable_by_text:
+                    stable_by_text[plate_text] = []
+                stable_by_text[plate_text].append(vehicle_id)
+            
+            # Group partial plates by text
+            partial_by_text = {}
+            for vehicle_id, (plate_text, count) in total_partial_plates.items():
+                if plate_text not in partial_by_text:
+                    partial_by_text[plate_text] = {'count': 0, 'vehicles': []}
+                partial_by_text[plate_text]['count'] += count
+                partial_by_text[plate_text]['vehicles'].append(vehicle_id)
+            
+            # Show stable plates (high confidence) with total readings and exact matches
+            if stable_by_text:
                 print("-"*60)
                 print("STABLE PLATES (>= 5 consistent readings):")
-                for vehicle_id, plate_text in sorted(total_plates_by_vehicle.items()):
-                    print(f"  Vehicle #{vehicle_id}: {plate_text}")
+                for plate_text, vehicle_ids in sorted(stable_by_text.items()):
+                    for vid in vehicle_ids:
+                        total_reads = vehicle_total_readings.get(vid, 0)
+                        exact_matches = vehicle_completion_count.get(vid, 0)
+                        locked_text = vehicle_locked_plates.get(vid, plate_text)
+                        
+                        if vid in total_vehicles_completed_ever:
+                            status = "[COMPLETED]"
+                        elif vid in vehicle_locked_plates:
+                            status = f"[LOCKED, {exact_matches}/{skip_manager.min_confident_readings} exact matches]"
+                        else:
+                            status = "[STABLE]"
+                        
+                        print(f"  {locked_text} (Vehicle #{vid}, {total_reads} readings) {status}")
             
-            # Show partial plates (brief appearances)
-            if total_partial_plates:
+            # Show partial plates (brief appearances) - consolidated by text
+            if partial_by_text:
                 print("-"*60)
                 print("PARTIAL PLATES (brief appearance, lower confidence):")
-                for vehicle_id, (plate_text, count) in sorted(total_partial_plates.items()):
-                    print(f"  Vehicle #{vehicle_id}: {plate_text} ({count} readings)")
+                for plate_text, data in sorted(partial_by_text.items()):
+                    total_readings = data['count']
+                    num_vehicles = len(data['vehicles'])
+                    if num_vehicles == 1:
+                        print(f"  {plate_text} ({total_readings} readings)")
+                    else:
+                        print(f"  {plate_text} ({total_readings} readings, {num_vehicles} detections)")
+            
+            # Calculate unique plates (by text, not by vehicle)
+            all_unique_plates = set(stable_by_text.keys()) | set(partial_by_text.keys())
             
             if ENABLE_SKIP_LOGIC:
                 stats = skip_manager.get_stats()
