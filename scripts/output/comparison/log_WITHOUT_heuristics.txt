@@ -1,0 +1,177 @@
+/bin/bash: line 1: lsmod: command not found
+/bin/bash: line 1: modprobe: command not found
+Unknown key 'display-text' for group [property]
+Unknown key 'display-text' for group [property]
+Opening in BLOCKING MODE 
+Setting min object dimensions as 16x16 instead of 1x1 to support VIC compute mode.
+0:00:00.464340677 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-lpr>[00m NvDsInferContext[UID 3]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 3]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/us_lprnet_baseline18_deployable.etlt_b8_gpu0_fp16.engine
+0:00:00.464418823 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-lpr>[00m NvDsInferContext[UID 3]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 3]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/us_lprnet_baseline18_deployable.etlt_b8_gpu0_fp16.engine
+0:00:00.473605777 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<secondary-inference-lpr>[00m [UID 3]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_tertiary_lprnet.txt sucessfully
+INFO: [FullDims Engine Info]: layers num: 3
+0   INPUT  kFLOAT image_input     3x48x96         min: 1x3x48x96       opt: 8x3x48x96       Max: 8x3x48x96       
+1   OUTPUT kINT64 tf_op_layer_ArgMax 24              min: 0               opt: 0               Max: 0               
+2   OUTPUT kFLOAT tf_op_layer_Max 24              min: 0               opt: 0               Max: 0               
+
+Setting min object dimensions as 16x16 instead of 1x1 to support VIC compute mode.
+0:00:00.599032752 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-plate>[00m NvDsInferContext[UID 2]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 2]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b8_gpu0_fp16.engine
+0:00:00.599112882 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-plate>[00m NvDsInferContext[UID 2]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 2]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b8_gpu0_fp16.engine
+0:00:00.603697159 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<secondary-inference-plate>[00m [UID 2]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_secondary_yolo11.txt sucessfully
+INFO: [FullDims Engine Info]: layers num: 2
+0   INPUT  kFLOAT input           3x320x320       min: 1x3x320x320     opt: 8x3x320x320     Max: 8x3x320x320     
+1   OUTPUT kFLOAT output          2100x6          min: 0               opt: 0               Max: 0               
+
+gstnvtracker: Loading low-level lib at /opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so
+[NvMultiObjectTracker] Initialized
+Setting min object dimensions as 16x16 instead of 1x1 to support VIC compute mode.
+0:00:00.740242595 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<primary-inference>[00m NvDsInferContext[UID 1]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 1]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b1_gpu0_fp16.engine
+0:00:00.740304100 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<primary-inference>[00m NvDsInferContext[UID 1]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 1]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b1_gpu0_fp16.engine
+0:00:00.742569054 [31m113370[00m 0xaaaacbd9e030 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<primary-inference>[00m [UID 1]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_primary_yolo11.txt sucessfully
+NvMMLiteOpen : Block : BlockType = 261 
+NvMMLiteBlockCreate : Block : BlockType = 261 
+Implicit layer support has been deprecated
+INFO: [Implicit Engine Info]: layers num: 0
+
+
+
+************************************************
+*** SUCCESS! THE NEW CODE IS RUNNING!      ***
+************************************************
+
+
+nvstreammux: Successfully handled EOS for source_id=0
+[NvMultiObjectTracker] De-initialized
+[ALPR] Starting DeepStream ALPR Pipeline...
+[ALPR] Mode: FILE
+[ALPR] Output: File
+[ALPR] Resolution: 1920x1080 (padding=ON)
+[ALPR] Working directory: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project
+[ALPR] GPU optimization ENABLED: Read Once, Skip Later
+[ALPR] Input:  /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/input_videos/sample.mp4
+[ALPR] Output: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/scripts/output/comparison/output_WITHOUT_heuristics.mp4
+[ALPR] Processing... (Press Ctrl+C to stop)
+[Info]60/3600 | Plates found: 3 | Vehicles completed: 2
+[Info]120/3600 | Plates found: 3 | Vehicles completed: 3
+[Info]180/3600 | Plates found: 3 | Vehicles completed: 3
+[Info]240/3600 | Plates found: 4 | Vehicles completed: 4
+[Info]300/3600 | Plates found: 6 | Vehicles completed: 5
+[Info]360/3600 | Plates found: 6 | Vehicles completed: 6
+[Info]420/3600 | Plates found: 6 | Vehicles completed: 6
+[Info]480/3600 | Plates found: 6 | Vehicles completed: 6
+[Info]540/3600 | Plates found: 9 | Vehicles completed: 8
+[Info]600/3600 | Plates found: 9 | Vehicles completed: 8
+[Info]660/3600 | Plates found: 9 | Vehicles completed: 8
+[Info]720/3600 | Plates found: 9 | Vehicles completed: 8
+[Info]780/3600 | Plates found: 12 | Vehicles completed: 11
+[Info]840/3600 | Plates found: 13 | Vehicles completed: 11
+[Info]900/3600 | Plates found: 14 | Vehicles completed: 11
+[Info]960/3600 | Plates found: 14 | Vehicles completed: 11
+[Info]1020/3600 | Plates found: 14 | Vehicles completed: 11
+[Info]1080/3600 | Plates found: 16 | Vehicles completed: 12
+[Info]1140/3600 | Plates found: 16 | Vehicles completed: 12
+[Info]1200/3600 | Plates found: 16 | Vehicles completed: 12
+[Info]1260/3600 | Plates found: 17 | Vehicles completed: 12
+[Info]1320/3600 | Plates found: 19 | Vehicles completed: 13
+[Info]1380/3600 | Plates found: 19 | Vehicles completed: 14
+[Info]1440/3600 | Plates found: 19 | Vehicles completed: 14
+[Info]1500/3600 | Plates found: 21 | Vehicles completed: 16
+[Info]1560/3600 | Plates found: 22 | Vehicles completed: 17
+[Info]1620/3600 | Plates found: 23 | Vehicles completed: 18
+[Info]1680/3600 | Plates found: 24 | Vehicles completed: 18
+[Info]1740/3600 | Plates found: 24 | Vehicles completed: 19
+[Info]1800/3600 | Plates found: 24 | Vehicles completed: 19
+[Info]1860/3600 | Plates found: 24 | Vehicles completed: 19
+[Info]1920/3600 | Plates found: 24 | Vehicles completed: 19
+[Info]1980/3600 | Plates found: 24 | Vehicles completed: 19
+[Info]2040/3600 | Plates found: 24 | Vehicles completed: 19
+[Info]2100/3600 | Plates found: 24 | Vehicles completed: 19
+[Info]2160/3600 | Plates found: 24 | Vehicles completed: 19
+[Info]2220/3600 | Plates found: 25 | Vehicles completed: 20
+[Info]2280/3600 | Plates found: 25 | Vehicles completed: 20
+[Info]2340/3600 | Plates found: 25 | Vehicles completed: 20
+[Info]2400/3600 | Plates found: 25 | Vehicles completed: 20
+[Info]2460/3600 | Plates found: 26 | Vehicles completed: 21
+[Info]2520/3600 | Plates found: 26 | Vehicles completed: 21
+[Info]2580/3600 | Plates found: 26 | Vehicles completed: 21
+[Info]2640/3600 | Plates found: 27 | Vehicles completed: 22
+[Info]2700/3600 | Plates found: 28 | Vehicles completed: 23
+[Info]2760/3600 | Plates found: 30 | Vehicles completed: 23
+[Info]2820/3600 | Plates found: 32 | Vehicles completed: 25
+[Info]2880/3600 | Plates found: 33 | Vehicles completed: 26
+[Info]2940/3600 | Plates found: 33 | Vehicles completed: 26
+[Info]3000/3600 | Plates found: 33 | Vehicles completed: 26
+[Info]3060/3600 | Plates found: 34 | Vehicles completed: 26
+[Info]3120/3600 | Plates found: 34 | Vehicles completed: 26
+[Info]3180/3600 | Plates found: 35 | Vehicles completed: 27
+[Info]3240/3600 | Plates found: 35 | Vehicles completed: 27
+[Info]3300/3600 | Plates found: 36 | Vehicles completed: 27
+[Info]3360/3600 | Plates found: 36 | Vehicles completed: 27
+[Info]3420/3600 | Plates found: 37 | Vehicles completed: 28
+[Info]3480/3600 | Plates found: 37 | Vehicles completed: 28
+[Info]3540/3600 | Plates found: 37 | Vehicles completed: 28
+[Info]0/3600 | Plates found: 37 | Vehicles completed: 28
+
+[CLEANUP] Stopping pipeline...
+[FINAL] Saved 1 remaining vehicles as partial plates
+
+============================================================
+PERFORMANCE SUMMARY
+============================================================
+Total frames:     3600
+Processing time:  141.30s
+Average FPS:      25.48
+Stable plates (high confidence):   33
+Partial plates (brief appearance): 7
+Total unique plate texts:          40
+------------------------------------------------------------
+STABLE PLATES (>= 5 consistent readings):
+  0T06WQ0 (Vehicle #137, 24 readings) [LOCKED]
+  0TE2VXJ (Vehicle #34, 115 readings) [LOCKED]
+  AF65JKU (Vehicle #32, 24 readings) [COMPLETED]
+  AK64DMU (Vehicle #35, 394 readings) [LOCKED]
+  AK64DVU (Vehicle #49, 16 readings) [LOCKED]
+  AO05JE0 (Vehicle #8, 13 readings) [COMPLETED]
+  AUD8HUF (Vehicle #29, 15 readings) [COMPLETED]
+  BG65TRJ (Vehicle #0, 194 readings) [LOCKED]
+  BO63L (Vehicle #83, 38 readings) [COMPLETED]
+  CE6LVXL (Vehicle #131, 65 readings) [COMPLETED]
+  DAD7CLW (Vehicle #53, 36 readings) [COMPLETED]
+  DF05UKJ (Vehicle #92, 26 readings) [LOCKED]
+  EF0D2S (Vehicle #51, 37 readings) [COMPLETED]
+  EX09UMR (Vehicle #73, 44 readings) [COMPLETED]
+  EX6LNBG (Vehicle #22, 22 readings) [COMPLETED]
+  FJ4YHX (Vehicle #5, 273 readings) [LOCKED]
+  GJ0GEOD (Vehicle #39, 49 readings) [COMPLETED]
+  GW50G (Vehicle #10, 86 readings) [COMPLETED]
+  HNL4C (Vehicle #25, 118 readings) [COMPLETED]
+  HW52BOF (Vehicle #126, 222 readings) [LOCKED]
+  KH0527K (Vehicle #6, 45 readings) [COMPLETED]
+  KH06KRT (Vehicle #46, 47 readings) [COMPLETED]
+  LL6LO2R (Vehicle #96, 33 readings) [COMPLETED]
+  LM3UCU (Vehicle #15, 23 readings) [COMPLETED]
+  LN5YYC (IDs [61, 66] (tracker switched), 89 readings) [COMPLETED]
+  LO4LJA (IDs [106, 129, 134] (tracker switched), 261 readings) [COMPLETED]
+  MM5LURT (Vehicle #9, 15 readings) [COMPLETED]
+  NA3NQT (Vehicle #13, 11 readings) [COMPLETED]
+  NA54KGJ (Vehicle #23, 20 readings) [COMPLETED]
+  NL640GW (IDs [111, 128] (tracker switched), 23 readings) [COMPLETED]
+  RC560XO (Vehicle #139, 48 readings) [COMPLETED]
+  UQ02FND (Vehicle #14, 99 readings) [COMPLETED]
+  VG652FW (Vehicle #100, 29 readings) [COMPLETED]
+------------------------------------------------------------
+PARTIAL PLATES (brief appearance, lower confidence):
+  5C6UOX5 (2 readings)
+  8L3F6 (1 readings)
+  GSBRF (2 readings)
+  INN30 (1 readings)
+  JLJTO (1 readings)
+  KH0574U (2 readings)
+  W1DLA88 (1 readings)
+------------------------------------------------------------
+GPU OPTIMIZATION (Read Once, Skip Later): ENABLED
+  Vehicles completed (total): 28
+  Total skipped:              6911
+  Total processed:            0
+  Skip ratio:                 100.0%
+------------------------------------------------------------
+HIGH-DENSITY HEURISTICS: DISABLED
+============================================================

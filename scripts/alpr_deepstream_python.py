@@ -29,14 +29,18 @@ import pyds
 from pathlib import Path
 
 # Import plate-vehicle association modules
-from plate_association import PlateVehicleScorer, SpatialGrid, SkipLogicManager, create_pre_sgie_probe
+from plate_association import (
+    PlateVehicleScorer, SpatialGrid, SkipLogicManager, 
+    create_pre_sgie_probe, HighDensityHeuristics,
+    get_heuristics_skipped, is_heuristics_active
+)
 
 # ==============================================================================
 # Configuration - Adjust paths as needed
 # ==============================================================================
 CONFIG_DIR = "/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project"
 
-INPUT_VIDEO = f"{CONFIG_DIR}/input_videos/video_3.mp4"
+INPUT_VIDEO = f"{CONFIG_DIR}/input_videos/sample.mp4"
 OUTPUT_VIDEO = f"{CONFIG_DIR}/output_videos/output_video_python.mp4"
 
 cap = cv2.VideoCapture(INPUT_VIDEO)
@@ -46,6 +50,7 @@ PGIE_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/config_infer_primary_yolo11.txt"
 SGIE_PLATE_DETECTOR_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/config_infer_secondary_yolo11.txt"
 SGIE_LPR_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/config_infer_tertiary_lprnet.txt"
 TRACKER_CONFIG = "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvSORT.yml"
+#TRACKER_CONFIG = "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvDCF_perf.yml"
 
 # Path to main DeepStream app config (to read settings from)
 APP_CONFIG = f"{CONFIG_DIR}/DeepStream-Yolo/deepstream_app_config.txt"
@@ -110,19 +115,22 @@ Examples:
     # Optimization options
     parser.add_argument('--no-skip', action='store_true',
                         help='Disable "Read Once, Skip Later" optimization (for comparison)')
+    parser.add_argument('--no-heuristics', action='store_true',
+                        help='Disable high-density heuristics (for comparison)')
     
     return parser.parse_args()
 
 def apply_arguments(args):
     """Apply command line arguments to global config."""
     global INPUT_VIDEO, OUTPUT_VIDEO, LIVE_MODE, ENABLE_RTSP, RTSP_PORT, RTSP_STREAM_NAME
-    global ENABLE_SKIP_LOGIC, TOTAL_FRAME
+    global ENABLE_SKIP_LOGIC, ENABLE_HEURISTICS, TOTAL_FRAME
     
     LIVE_MODE = args.live
     ENABLE_RTSP = args.rtsp
     RTSP_PORT = args.rtsp_port
     RTSP_STREAM_NAME = args.rtsp_name
     ENABLE_SKIP_LOGIC = not args.no_skip  # --no-skip disables it
+    ENABLE_HEURISTICS = not args.no_heuristics  # --no-heuristics disables it
     
     if args.input:
         INPUT_VIDEO = args.input
@@ -221,6 +229,7 @@ vehicle_plate_history = defaultdict(list)
 # Key: vehicle_track_id
 # Value: stable plate text for this vehicle
 vehicle_stable_plates = {}
+
 
 # LOCKED plate text - once set, never changes (for accurate completion)
 # Key: vehicle_track_id, Value: locked plate text
@@ -371,10 +380,23 @@ skip_manager = SkipLogicManager(
     min_plate_length=MIN_PLATE_LENGTH,  # Same as stabilization check
     max_frames_missing=90           # Cleanup threshold
 )
+
+# High-density traffic heuristics (filter vehicles when too many in frame)
+# Enable/disable with command line flag --no-heuristics
+ENABLE_HEURISTICS = True
+heuristics_manager = HighDensityHeuristics(
+    frame_width=1920,   # Will be updated from config
+    frame_height=1080
+)
 # Note: SGIE min size (50) is configured in config_infer_secondary_yolo11.txt
 
 # Create the pre-SGIE probe function
-pre_sgie_probe = create_pre_sgie_probe(skip_manager)
+# Pass heuristics_manager for worst-case high-density filtering (actual GPU savings!)
+pre_sgie_probe = create_pre_sgie_probe(
+    skip_manager, 
+    heuristics_manager=heuristics_manager if ENABLE_HEURISTICS else None,
+    completed_vehicles_set=total_vehicles_completed_ever
+)
 
 
 def osd_sink_pad_buffer_probe(pad, info, u_data):
@@ -425,13 +447,31 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                 if obj_meta.unique_component_id == 1:
                     vehicle_id = obj_meta.object_id
                     
+                    # Check if this vehicle was SKIPPED by heuristics
+                    heuristics_skipped = get_heuristics_skipped(frame_num)
+                    is_skipped_by_heuristics = vehicle_id in heuristics_skipped
+                    
                     # Skip logic handling (only when enabled)
                     if ENABLE_SKIP_LOGIC:
                         # Restore bbox if it was shrunk by pre_sgie_probe
                         skip_manager.restore_bbox(obj_meta, frame_num)
                         
+                        # VISUAL: Skipped by heuristics = BLUE box + [SKIP] label
+                        if is_skipped_by_heuristics:
+                            obj_meta.text_params.display_text = f"[SKIP] #{vehicle_id}"
+                            obj_meta.text_params.set_bg_clr = 1
+                            obj_meta.text_params.text_bg_clr.red = 0.0
+                            obj_meta.text_params.text_bg_clr.green = 0.0
+                            obj_meta.text_params.text_bg_clr.blue = 1.0
+                            obj_meta.text_params.text_bg_clr.alpha = 1.0
+                            # BLUE border (very visible)
+                            obj_meta.rect_params.border_color.red = 0.0
+                            obj_meta.rect_params.border_color.green = 0.0
+                            obj_meta.rect_params.border_color.blue = 1.0
+                            obj_meta.rect_params.border_color.alpha = 1.0
+                            obj_meta.rect_params.border_width = 4  # Thicker border
                         # For COMPLETED vehicles: GREEN background + locked plate
-                        if skip_manager.is_completed(vehicle_id):
+                        elif skip_manager.is_completed(vehicle_id):
                             # Use LOCKED plate (confirmed text) for completed vehicles
                             stored_plate = vehicle_locked_plates.get(vehicle_id, vehicle_stable_plates.get(vehicle_id, ""))
                             if stored_plate:
@@ -469,40 +509,36 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
             except StopIteration:
                 break
         
+        # HIGH-DENSITY HEURISTICS: Now handled in pre-SGIE probe for REAL GPU savings!
+        # The pre-SGIE probe shrinks bboxes for low-priority vehicles, so SGIE skips them.
+        # This post-inference check is just a safety net / consistency check.
+        prioritized_vehicle_ids = None  # None = process all (filtering done at pre-SGIE)
+        
         # Process plates with multi-factor scoring
         for plate_meta in plates_to_process:
             try:
-                # Try parent metadata first (fastest path)
                 # Use -1 as "no match" sentinel (0 is a valid tracker ID!)
                 parent_id = -1
-                parent_source = "none"
                 
-                if plate_meta.parent:
-                    try:
-                        parent_obj = pyds.NvDsObjectMeta.cast(plate_meta.parent)
-                        raw_parent_id = parent_obj.object_id
-                        if raw_parent_id != 18446744073709551615:  # Valid ID
-                            parent_id = raw_parent_id
-                            parent_source = "parent_meta"
-                    except Exception:
-                        pass
+                plate_rect = plate_meta.rect_params
+                plate_cx = plate_rect.left + plate_rect.width / 2
+                plate_cy = plate_rect.top + plate_rect.height / 2
                 
-                # Fallback: Use spatial grid + multi-factor scoring
-                if parent_id == -1:  # No match from DeepStream parent
-                    plate_rect = plate_meta.rect_params
-                    plate_cx = plate_rect.left + plate_rect.width / 2
-                    plate_cy = plate_rect.top + plate_rect.height / 2
-                    
-                    # Get candidate vehicles from spatial grid (O(1))
-                    candidates = spatial_grid.get_candidate_vehicles(plate_cx, plate_cy)
-                    
-                    # Use multi-factor scoring to find best match
-                    if candidates:
-                        parent_id, score = plate_scorer.find_best_vehicle(
-                            plate_rect, candidates, min_score=0.1
-                        )
-                        if score > 0:  # Check score, not ID (ID 0 is valid!)
-                            parent_source = "spatial_match"
+                # Note: plate_meta.parent is always None in Python bindings (pyds limitation)
+                # We rely entirely on spatial matching for plate-vehicle association
+                
+                # Use spatial grid + multi-factor scoring
+                candidates = spatial_grid.get_candidate_vehicles(plate_cx, plate_cy)
+                if candidates:
+                    parent_id, score = plate_scorer.find_best_vehicle(
+                        plate_rect, candidates, min_score=0.1
+                    )
+                
+                # HIGH-DENSITY: Skip plates from low-priority vehicles
+                if prioritized_vehicle_ids is not None and parent_id >= 0:
+                    if parent_id not in prioritized_vehicle_ids:
+                        # Low priority vehicle - skip detailed processing
+                        continue
                 
                 # Check if this vehicle is already completed (plate already known)
                 if ENABLE_SKIP_LOGIC and parent_id >= 0 and skip_manager.is_completed(parent_id):
@@ -530,6 +566,7 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                             l_cls = l_cls.next
                         except StopIteration:
                             break
+                    
                     
                     # Get stable plate text using majority voting
                     display_text = None
@@ -1059,39 +1096,64 @@ def main():
                 partial_by_text[plate_text]['count'] += count
                 partial_by_text[plate_text]['vehicles'].append(vehicle_id)
             
-            # Show stable plates (high confidence) with total readings and exact matches
+            # Show stable plates (high confidence) - DEDUPLICATED by plate text
+            # Same plate text with multiple vehicle IDs = tracker ID switches (same car)
             if stable_by_text:
                 print("-"*60)
                 print("STABLE PLATES (>= 5 consistent readings):")
                 for plate_text, vehicle_ids in sorted(stable_by_text.items()):
-                    for vid in vehicle_ids:
-                        total_reads = vehicle_total_readings.get(vid, 0)
-                        exact_matches = vehicle_completion_count.get(vid, 0)
-                        locked_text = vehicle_locked_plates.get(vid, plate_text)
-                        
-                        if vid in total_vehicles_completed_ever:
-                            status = "[COMPLETED]"
-                        elif vid in vehicle_locked_plates:
-                            status = f"[LOCKED, {exact_matches}/{skip_manager.min_confident_readings} exact matches]"
+                    # Aggregate stats across all vehicle IDs for this plate (from stable vehicles)
+                    total_reads = sum(vehicle_total_readings.get(vid, 0) for vid in vehicle_ids)
+                    
+                    # ALSO add readings from partial vehicles with same plate text
+                    # (tracker switched but didn't get enough readings to become stable again)
+                    if plate_text in partial_by_text:
+                        total_reads += partial_by_text[plate_text]['count']
+                        # Also include those vehicle IDs in the list
+                        vehicle_ids = vehicle_ids + partial_by_text[plate_text]['vehicles']
+                    
+                    any_completed = any(vid in total_vehicles_completed_ever for vid in vehicle_ids)
+                    
+                    # Determine status
+                    if any_completed:
+                        status = "[COMPLETED]"
+                    else:
+                        # Check if any are locked
+                        locked_count = sum(1 for vid in vehicle_ids if vid in vehicle_locked_plates)
+                        if locked_count > 0:
+                            status = "[LOCKED]"
                         else:
                             status = "[STABLE]"
-                        
-                        print(f"  {locked_text} (Vehicle #{vid}, {total_reads} readings) {status}")
+                    
+                    # Format vehicle IDs (deduplicated display)
+                    if len(vehicle_ids) == 1:
+                        vid_str = f"Vehicle #{vehicle_ids[0]}"
+                    else:
+                        # Multiple IDs = tracker switched (same physical car)
+                        vid_str = f"IDs {sorted(vehicle_ids)} (tracker switched)"
+                    
+                    print(f"  {plate_text} ({vid_str}, {total_reads} readings) {status}")
             
-            # Show partial plates (brief appearances) - consolidated by text
-            if partial_by_text:
+            # Show partial plates (brief appearances) - EXCLUDE plates already in stable
+            # Filter out any plate text that already appears in stable section
+            partial_only = {k: v for k, v in partial_by_text.items() if k not in stable_by_text}
+            
+            if partial_only:
                 print("-"*60)
                 print("PARTIAL PLATES (brief appearance, lower confidence):")
-                for plate_text, data in sorted(partial_by_text.items()):
+                for plate_text, data in sorted(partial_only.items()):
                     total_readings = data['count']
-                    num_vehicles = len(data['vehicles'])
-                    if num_vehicles == 1:
-                        print(f"  {plate_text} ({total_readings} readings)")
+                    vehicle_ids = data['vehicles']
+                    if len(vehicle_ids) == 1:
+                        print(f"  {plate_text} (Vehicle #{vehicle_ids[0]}, {total_readings} readings)")
                     else:
-                        print(f"  {plate_text} ({total_readings} readings, {num_vehicles} detections)")
+                        # Multiple vehicle IDs = tracker switched
+                        vid_str = ", ".join(f"#{v}" for v in sorted(vehicle_ids))
+                        print(f"  {plate_text} (Vehicles {vid_str}, {total_readings} readings)")
             
             # Calculate unique plates (by text, not by vehicle)
-            all_unique_plates = set(stable_by_text.keys()) | set(partial_by_text.keys())
+            # partial_only already excludes stable plates, so this is the true unique count
+            all_unique_plates = set(stable_by_text.keys()) | set(partial_only.keys())
             
             if ENABLE_SKIP_LOGIC:
                 stats = skip_manager.get_stats()
@@ -1102,13 +1164,21 @@ def main():
                 print(f"  Total processed:            {stats['total_processed']}")
                 if stats['total_skipped'] + stats['total_processed'] > 0:
                     print(f"  Skip ratio:                 {stats['skip_ratio']:.1%}")
-                print("-"*60)
-                print("To compare without optimization, run with: --no-skip")
             else:
                 print("-"*60)
                 print("GPU OPTIMIZATION: DISABLED (comparison mode)")
+            
+            if ENABLE_HEURISTICS:
+                h_stats = heuristics_manager.get_stats()
                 print("-"*60)
-                print("To enable optimization, run without --no-skip flag")
+                print("HIGH-DENSITY HEURISTICS: ENABLED")
+                print(f"  Density threshold:          {heuristics_manager.HIGH_DENSITY_THRESHOLD} vehicles")
+                print(f"  Max process per frame:      {heuristics_manager.MAX_PROCESS_PER_FRAME}")
+                print(f"  High-density activations:   {h_stats['high_density_activations']}")
+                print(f"  Total vehicles filtered:    {h_stats['total_filtered']}")
+            else:
+                print("-"*60)
+                print("HIGH-DENSITY HEURISTICS: DISABLED")
             print("="*60)
 
 

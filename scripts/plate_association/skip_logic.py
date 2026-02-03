@@ -26,7 +26,7 @@ class SkipLogicManager:
     in subsequent frames to save GPU resources.
     """
     
-    def __init__(self, min_confident_readings=6, min_plate_length=5, 
+    def __init__(self, min_confident_readings=6, min_plate_length=7, 
                  max_frames_missing=90):
         """
         Initialize the skip logic manager.
@@ -196,14 +196,32 @@ class SkipLogicManager:
         }
 
 
-def create_pre_sgie_probe(skip_manager):
+# Global set to track vehicles skipped by heuristics (for visual display)
+# Key: frame_num, Value: set of vehicle_ids skipped in that frame
+heuristics_skipped_vehicles = {}
+
+def get_heuristics_skipped(frame_num):
+    """Get set of vehicle IDs skipped by heuristics in this frame."""
+    return heuristics_skipped_vehicles.get(frame_num, set())
+
+def is_heuristics_active(frame_num):
+    """Check if heuristics was active (skipping vehicles) in this frame."""
+    return frame_num in heuristics_skipped_vehicles
+
+
+def create_pre_sgie_probe(skip_manager, heuristics_manager=None, completed_vehicles_set=None):
     """
     Create a probe function to run BEFORE Secondary GIE.
     
-    This probe shrinks bboxes of completed vehicles so SGIE skips them.
+    This probe:
+    1. Shrinks bboxes of completed vehicles so SGIE skips them
+    2. In HIGH-DENSITY mode: Only processes top N vehicles by priority score
+       (shrinks the rest so SGIE skips them - ACTUAL GPU savings!)
     
     Args:
         skip_manager: SkipLogicManager instance
+        heuristics_manager: Optional HighDensityHeuristics instance for worst-case filtering
+        completed_vehicles_set: Optional set of completed vehicle IDs (for heuristics scoring)
         
     Returns:
         Probe function to attach before SGIE
@@ -227,22 +245,75 @@ def create_pre_sgie_probe(skip_manager):
             except StopIteration:
                 break
             
+            # PHASE 1: Collect all vehicles in this frame
+            vehicles_in_frame = []  # List of (vehicle_id, obj_meta)
             l_obj = frame_meta.obj_meta_list
             while l_obj is not None:
                 try:
                     obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
-                    
-                    # Only process vehicles (primary GIE, gie-unique-id=1)
-                    if obj_meta.unique_component_id == 1:
-                        skip_manager.shrink_bbox_for_skip(obj_meta, frame_num)
-                    
+                    if obj_meta.unique_component_id == 1:  # Vehicle
+                        vehicle_id = obj_meta.object_id
+                        vehicles_in_frame.append((vehicle_id, obj_meta))
                 except Exception:
                     pass
-                
                 try:
                     l_obj = l_obj.next
                 except StopIteration:
                     break
+            
+            # PHASE 2: Determine which vehicles to skip
+            vehicles_to_skip = set()
+            is_high_density = False
+            
+            # Get completed vehicles set (needed for both debug and processing)
+            completed = completed_vehicles_set if completed_vehicles_set else skip_manager.completed_vehicles
+            
+            # OPTIMIZATION: Separate completed vs non-completed vehicles
+            # Completed vehicles are ALWAYS skipped, no need to include in heuristics queue
+            non_completed_vehicles = []
+            completed_in_frame = []
+            for vid, obj_meta in vehicles_in_frame:
+                if vid in completed:
+                    completed_in_frame.append((vid, obj_meta))
+                else:
+                    non_completed_vehicles.append((vid, obj_meta))
+            
+            # HIGH-DENSITY HEURISTICS: Only count NON-COMPLETED vehicles for threshold
+            # (completed vehicles don't need processing anyway)
+            if heuristics_manager and len(non_completed_vehicles) > heuristics_manager.HIGH_DENSITY_THRESHOLD:
+                is_high_density = True
+                
+                # Prepare ONLY non-completed vehicles for scoring
+                vehicles_for_scoring = [(vid, obj_meta.rect_params) for vid, obj_meta in non_completed_vehicles]
+                
+                # Get prioritized list (top N by score) - no completed vehicles in this list!
+                prioritized = heuristics_manager.filter_and_prioritize(
+                    vehicles_for_scoring, completed  # completed set used for scoring weights
+                )
+                prioritized_ids = set(vid for vid, _ in prioritized)
+                
+                # Mark non-prioritized (non-completed) for skipping
+                for vid, obj_meta in non_completed_vehicles:
+                    if vid not in prioritized_ids:
+                        vehicles_to_skip.add(vid)
+                
+                # Store skipped vehicles for visual display
+                heuristics_skipped_vehicles[frame_num] = vehicles_to_skip.copy()
+                
+                # Cleanup old entries (keep last 10 frames)
+                old_frames = [f for f in heuristics_skipped_vehicles if f < frame_num - 10]
+                for f in old_frames:
+                    heuristics_skipped_vehicles.pop(f, None)
+            
+            # PHASE 3: Apply skip logic (shrink bboxes) AND visual markers
+            for vehicle_id, obj_meta in vehicles_in_frame:
+                should_skip = skip_manager.is_completed(vehicle_id) or vehicle_id in vehicles_to_skip
+                
+                if should_skip:
+                    skip_manager.shrink_bbox_for_skip(obj_meta, frame_num)
+                
+                # Note: Visual markers are applied in the OSD probe (after this)
+                # because they would be overwritten here anyway
             
             try:
                 l_frame = l_frame.next

@@ -113,6 +113,22 @@ class SpatialGrid:
         """Return number of grid cells with vehicles."""
         return len(self.grid)
     
+    def get_all_vehicles(self):
+        """
+        Get all vehicles currently in the grid.
+        
+        Returns:
+            List of (vehicle_id, rect) tuples for all vehicles
+        """
+        seen_ids = set()
+        result = []
+        for vehicles in self.grid.values():
+            for vehicle_id, rect in vehicles:
+                if vehicle_id not in seen_ids:
+                    seen_ids.add(vehicle_id)
+                    result.append((vehicle_id, rect))
+        return result
+    
     def stats(self):
         """
         Get statistics about the grid.
