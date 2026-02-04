@@ -4,18 +4,18 @@ Unknown key 'display-text' for group [property]
 Unknown key 'display-text' for group [property]
 Opening in BLOCKING MODE 
 Setting min object dimensions as 16x16 instead of 1x1 to support VIC compute mode.
-0:00:00.484690924 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-lpr>[00m NvDsInferContext[UID 3]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 3]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/us_lprnet_baseline18_deployable.etlt_b8_gpu0_fp16.engine
-0:00:00.484770446 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-lpr>[00m NvDsInferContext[UID 3]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 3]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/us_lprnet_baseline18_deployable.etlt_b8_gpu0_fp16.engine
-0:00:00.494128125 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<secondary-inference-lpr>[00m [UID 3]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_tertiary_lprnet.txt sucessfully
+0:00:00.481909980 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-lpr>[00m NvDsInferContext[UID 3]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 3]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/us_lprnet_baseline18_deployable.etlt_b8_gpu0_fp16.engine
+0:00:00.481992830 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-lpr>[00m NvDsInferContext[UID 3]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 3]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/us_lprnet_baseline18_deployable.etlt_b8_gpu0_fp16.engine
+0:00:00.490899640 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<secondary-inference-lpr>[00m [UID 3]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_tertiary_lprnet.txt sucessfully
 INFO: [FullDims Engine Info]: layers num: 3
 0   INPUT  kFLOAT image_input     3x48x96         min: 1x3x48x96       opt: 8x3x48x96       Max: 8x3x48x96       
 1   OUTPUT kINT64 tf_op_layer_ArgMax 24              min: 0               opt: 0               Max: 0               
 2   OUTPUT kFLOAT tf_op_layer_Max 24              min: 0               opt: 0               Max: 0               
 
 Setting min object dimensions as 16x16 instead of 1x1 to support VIC compute mode.
-0:00:00.608661030 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-plate>[00m NvDsInferContext[UID 2]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 2]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b8_gpu0_fp16.engine
-0:00:00.608738856 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-plate>[00m NvDsInferContext[UID 2]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 2]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b8_gpu0_fp16.engine
-0:00:00.613463489 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<secondary-inference-plate>[00m [UID 2]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_secondary_yolo11.txt sucessfully
+0:00:00.612875491 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-plate>[00m NvDsInferContext[UID 2]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 2]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b8_gpu0_fp16.engine
+0:00:00.612955077 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<secondary-inference-plate>[00m NvDsInferContext[UID 2]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 2]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b8_gpu0_fp16.engine
+0:00:00.617523349 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<secondary-inference-plate>[00m [UID 2]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_secondary_yolo11.txt sucessfully
 INFO: [FullDims Engine Info]: layers num: 2
 0   INPUT  kFLOAT input           3x320x320       min: 1x3x320x320     opt: 8x3x320x320     Max: 8x3x320x320     
 1   OUTPUT kFLOAT output          2100x6          min: 0               opt: 0               Max: 0               
@@ -23,9 +23,9 @@ INFO: [FullDims Engine Info]: layers num: 2
 gstnvtracker: Loading low-level lib at /opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so
 [NvMultiObjectTracker] Initialized
 Setting min object dimensions as 16x16 instead of 1x1 to support VIC compute mode.
-0:00:00.743807934 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<primary-inference>[00m NvDsInferContext[UID 1]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 1]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b1_gpu0_fp16.engine
-0:00:00.743870271 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<primary-inference>[00m NvDsInferContext[UID 1]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 1]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b1_gpu0_fp16.engine
-0:00:00.746116089 [34m111453[00m 0xaaab0eb5bb70 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<primary-inference>[00m [UID 1]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_primary_yolo11.txt sucessfully
+0:00:00.742786385 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<primary-inference>[00m NvDsInferContext[UID 1]: Info from NvDsInferContextImpl::deserializeEngineAndBackend() <nvdsinfer_context_impl.cpp:2092> [UID = 1]: deserialized trt engine from :/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b1_gpu0_fp16.engine
+0:00:00.742850963 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer.cpp:684:gst_nvinfer_logger:<primary-inference>[00m NvDsInferContext[UID 1]: Info from NvDsInferContextImpl::generateBackendContext() <nvdsinfer_context_impl.cpp:2195> [UID = 1]: Use deserialized engine model: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/model_b1_gpu0_fp16.engine
+0:00:00.745019016 [35m80620[00m 0xaaaab25f2f20 [36mINFO   [00m [00m             nvinfer gstnvinfer_impl.cpp:343:notifyLoadModelStatus:<primary-inference>[00m [UID 1]: Load new model:/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/config_infer_primary_yolo11.txt sucessfully
 NvMMLiteOpen : Block : BlockType = 261 
 NvMMLiteBlockCreate : Block : BlockType = 261 
 Implicit layer support has been deprecated
@@ -39,6 +39,8 @@ INFO: [Implicit Engine Info]: layers num: 0
 
 
 nvstreammux: Successfully handled EOS for source_id=0
+[NvMultiObjectTracker] De-initialized
+Loaded 10 vehicle labels from /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/DeepStream-Yolo/labels_vehicles.txt
 [ALPR] Starting DeepStream ALPR Pipeline...
 [ALPR] Mode: FILE
 [ALPR] Output: File
@@ -49,187 +51,131 @@ nvstreammux: Successfully handled EOS for source_id=0
 [ALPR] Output: /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/scripts/output/comparison/output_WITH_heuristics.mp4
 [ALPR] Processing... (Press Ctrl+C to stop)
 [Info]60/3600 | Plates found: 3 | Vehicles completed: 2
-[Heuristics] Frame 61: 12 vehicles, processing top 5
-[Info]120/3600 | Plates found: 3 | Vehicles completed: 3
-[Heuristics] Frame 121: 14 vehicles, processing top 5
-[Info]180/3600 | Plates found: 3 | Vehicles completed: 3
-[Heuristics] Frame 181: 12 vehicles, processing top 5
-[Info]240/3600 | Plates found: 4 | Vehicles completed: 4
-[Heuristics] Frame 241: 12 vehicles, processing top 5
-[Info]300/3600 | Plates found: 6 | Vehicles completed: 5
-[Heuristics] Frame 301: 13 vehicles, processing top 5
-[Info]360/3600 | Plates found: 6 | Vehicles completed: 6
-[Heuristics] Frame 361: 13 vehicles, processing top 5
-[Info]420/3600 | Plates found: 6 | Vehicles completed: 6
-[Heuristics] Frame 421: 12 vehicles, processing top 5
-[Info]480/3600 | Plates found: 6 | Vehicles completed: 6
-[Heuristics] Frame 481: 14 vehicles, processing top 5
-[Info]540/3600 | Plates found: 9 | Vehicles completed: 8
-[Heuristics] Frame 541: 16 vehicles, processing top 5
-[Info]600/3600 | Plates found: 9 | Vehicles completed: 8
-[Heuristics] Frame 601: 14 vehicles, processing top 5
-[Info]660/3600 | Plates found: 9 | Vehicles completed: 8
-[Heuristics] Frame 661: 15 vehicles, processing top 5
-[Info]720/3600 | Plates found: 9 | Vehicles completed: 8
-[Heuristics] Frame 721: 13 vehicles, processing top 5
-[Info]780/3600 | Plates found: 12 | Vehicles completed: 11
-[Heuristics] Frame 781: 14 vehicles, processing top 5
-[Info]840/3600 | Plates found: 13 | Vehicles completed: 11
-[Heuristics] Frame 841: 14 vehicles, processing top 5
-[Info]900/3600 | Plates found: 14 | Vehicles completed: 11
-[Heuristics] Frame 901: 17 vehicles, processing top 5
-[Info]960/3600 | Plates found: 14 | Vehicles completed: 11
-[Heuristics] Frame 961: 13 vehicles, processing top 5
-[Info]1020/3600 | Plates found: 14 | Vehicles completed: 11
-[Heuristics] Frame 1021: 13 vehicles, processing top 5
-[Info]1080/3600 | Plates found: 16 | Vehicles completed: 12
-[Heuristics] Frame 1081: 15 vehicles, processing top 5
-[Info]1140/3600 | Plates found: 16 | Vehicles completed: 12
-[Heuristics] Frame 1141: 14 vehicles, processing top 5
-[Info]1200/3600 | Plates found: 16 | Vehicles completed: 12
-[Heuristics] Frame 1201: 16 vehicles, processing top 5
-[Info]1260/3600 | Plates found: 17 | Vehicles completed: 12
-[Heuristics] Frame 1261: 16 vehicles, processing top 5
-[Info]1320/3600 | Plates found: 18 | Vehicles completed: 13
-[Heuristics] Frame 1321: 11 vehicles, processing top 5
-[Info]1380/3600 | Plates found: 19 | Vehicles completed: 13
-[Heuristics] Frame 1381: 13 vehicles, processing top 5
-[Info]1440/3600 | Plates found: 19 | Vehicles completed: 14
-[Heuristics] Frame 1441: 12 vehicles, processing top 5
-[Info]1500/3600 | Plates found: 21 | Vehicles completed: 16
-[Heuristics] Frame 1501: 12 vehicles, processing top 5
-[Info]1560/3600 | Plates found: 22 | Vehicles completed: 17
-[Heuristics] Frame 1561: 10 vehicles, processing top 5
-[Info]1620/3600 | Plates found: 23 | Vehicles completed: 18
-[Heuristics] Frame 1621: 9 vehicles, processing top 5
-[Info]1680/3600 | Plates found: 24 | Vehicles completed: 18
-[Heuristics] Frame 1681: 11 vehicles, processing top 5
-[Info]1740/3600 | Plates found: 24 | Vehicles completed: 19
-[Heuristics] Frame 1741: 15 vehicles, processing top 5
-[Info]1800/3600 | Plates found: 24 | Vehicles completed: 19
-[Heuristics] Frame 1801: 14 vehicles, processing top 5
-[Info]1860/3600 | Plates found: 24 | Vehicles completed: 19
-[Heuristics] Frame 1861: 11 vehicles, processing top 5
-[Info]1920/3600 | Plates found: 24 | Vehicles completed: 19
-[Heuristics] Frame 1921: 13 vehicles, processing top 5
-[Info]1980/3600 | Plates found: 24 | Vehicles completed: 19
-[Heuristics] Frame 1981: 11 vehicles, processing top 5
-[Info]2040/3600 | Plates found: 24 | Vehicles completed: 19
-[Heuristics] Frame 2041: 9 vehicles, processing top 5
-[Info]2100/3600 | Plates found: 24 | Vehicles completed: 19
-[Heuristics] Frame 2101: 13 vehicles, processing top 5
-[Info]2160/3600 | Plates found: 24 | Vehicles completed: 19
-[Heuristics] Frame 2161: 13 vehicles, processing top 5
-[Info]2220/3600 | Plates found: 25 | Vehicles completed: 20
-[Heuristics] Frame 2221: 13 vehicles, processing top 5
-[Info]2280/3600 | Plates found: 25 | Vehicles completed: 20
-[Heuristics] Frame 2281: 14 vehicles, processing top 5
-[Info]2340/3600 | Plates found: 25 | Vehicles completed: 20
-[Heuristics] Frame 2341: 12 vehicles, processing top 5
-[Info]2400/3600 | Plates found: 25 | Vehicles completed: 20
-[Heuristics] Frame 2401: 15 vehicles, processing top 5
-[Info]2460/3600 | Plates found: 26 | Vehicles completed: 21
-[Heuristics] Frame 2461: 15 vehicles, processing top 5
-[Info]2520/3600 | Plates found: 26 | Vehicles completed: 21
-[Heuristics] Frame 2521: 13 vehicles, processing top 5
-[Info]2580/3600 | Plates found: 26 | Vehicles completed: 21
-[Heuristics] Frame 2581: 12 vehicles, processing top 5
-[Info]2640/3600 | Plates found: 27 | Vehicles completed: 22
-[Heuristics] Frame 2641: 10 vehicles, processing top 5
-[Info]2700/3600 | Plates found: 28 | Vehicles completed: 23
-[Heuristics] Frame 2701: 11 vehicles, processing top 5
-[Info]2760/3600 | Plates found: 30 | Vehicles completed: 23
-[Heuristics] Frame 2761: 10 vehicles, processing top 5
-[Info]2820/3600 | Plates found: 32 | Vehicles completed: 25
-[Heuristics] Frame 2821: 9 vehicles, processing top 5
-[Info]2880/3600 | Plates found: 33 | Vehicles completed: 26
-[Info]2940/3600 | Plates found: 33 | Vehicles completed: 26
-[Heuristics] Frame 2941: 14 vehicles, processing top 5
-[Info]3000/3600 | Plates found: 33 | Vehicles completed: 26
-[Heuristics] Frame 3001: 13 vehicles, processing top 5
-[Info]3060/3600 | Plates found: 34 | Vehicles completed: 26
-[Heuristics] Frame 3061: 15 vehicles, processing top 5
-[Info]3120/3600 | Plates found: 34 | Vehicles completed: 26
-[Heuristics] Frame 3121: 13 vehicles, processing top 5
-[Info]3180/3600 | Plates found: 34 | Vehicles completed: 26
-[Heuristics] Frame 3181: 14 vehicles, processing top 5
-[Info]3240/3600 | Plates found: 35 | Vehicles completed: 27
-[Heuristics] Frame 3241: 14 vehicles, processing top 5
-[Info]3300/3600 | Plates found: 36 | Vehicles completed: 27
-[Heuristics] Frame 3301: 14 vehicles, processing top 5
-[Info]3360/3600 | Plates found: 36 | Vehicles completed: 27
-[Heuristics] Frame 3361: 14 vehicles, processing top 5
-[Info]3420/3600 | Plates found: 36 | Vehicles completed: 27
-[Heuristics] Frame 3421: 15 vehicles, processing top 5
-[Info]3480/3600 | Plates found: 37 | Vehicles completed: 28
-[Heuristics] Frame 3481: 12 vehicles, processing top 5
-[Info]3540/3600 | Plates found: 37 | Vehicles completed: 28
-[Heuristics] Frame 3541: 15 vehicles, processing top 5
-[Info]0/3600 | Plates found: 37 | Vehicles completed: 28
+[Info]120/3600 | Plates found: 3 | Vehicles completed: 2
+[Info]180/3600 | Plates found: 3 | Vehicles completed: 2
+[Info]240/3600 | Plates found: 4 | Vehicles completed: 3
+[Info]300/3600 | Plates found: 6 | Vehicles completed: 4
+[Info]360/3600 | Plates found: 6 | Vehicles completed: 4
+[Info]420/3600 | Plates found: 6 | Vehicles completed: 4
+[Info]480/3600 | Plates found: 7 | Vehicles completed: 4
+[Info]540/3600 | Plates found: 8 | Vehicles completed: 5
+[Info]600/3600 | Plates found: 9 | Vehicles completed: 6
+[Info]660/3600 | Plates found: 9 | Vehicles completed: 6
+[Info]720/3600 | Plates found: 9 | Vehicles completed: 6
+[Info]780/3600 | Plates found: 12 | Vehicles completed: 8
+[Info]840/3600 | Plates found: 13 | Vehicles completed: 8
+[Info]900/3600 | Plates found: 14 | Vehicles completed: 9
+[Info]960/3600 | Plates found: 14 | Vehicles completed: 9
+[Info]1020/3600 | Plates found: 14 | Vehicles completed: 9
+[Info]1080/3600 | Plates found: 15 | Vehicles completed: 10
+[Info]1140/3600 | Plates found: 15 | Vehicles completed: 10
+[Info]1200/3600 | Plates found: 15 | Vehicles completed: 10
+[Info]1260/3600 | Plates found: 15 | Vehicles completed: 10
+[Info]1320/3600 | Plates found: 16 | Vehicles completed: 11
+[Info]1380/3600 | Plates found: 17 | Vehicles completed: 12
+[Info]1440/3600 | Plates found: 18 | Vehicles completed: 13
+[Info]1500/3600 | Plates found: 19 | Vehicles completed: 13
+[Info]1560/3600 | Plates found: 19 | Vehicles completed: 13
+[Info]1620/3600 | Plates found: 20 | Vehicles completed: 14
+[Info]1680/3600 | Plates found: 20 | Vehicles completed: 14
+[Info]1740/3600 | Plates found: 21 | Vehicles completed: 14
+[Info]1800/3600 | Plates found: 23 | Vehicles completed: 15
+[Info]1860/3600 | Plates found: 23 | Vehicles completed: 15
+[Info]1920/3600 | Plates found: 24 | Vehicles completed: 16
+[Info]1980/3600 | Plates found: 24 | Vehicles completed: 16
+[Info]2040/3600 | Plates found: 24 | Vehicles completed: 16
+[Info]2100/3600 | Plates found: 24 | Vehicles completed: 16
+[Info]2160/3600 | Plates found: 24 | Vehicles completed: 16
+[Info]2220/3600 | Plates found: 25 | Vehicles completed: 16
+[Info]2280/3600 | Plates found: 25 | Vehicles completed: 16
+[Info]2340/3600 | Plates found: 25 | Vehicles completed: 16
+[Info]2400/3600 | Plates found: 25 | Vehicles completed: 16
+[Info]2460/3600 | Plates found: 26 | Vehicles completed: 17
+[Info]2520/3600 | Plates found: 26 | Vehicles completed: 17
+[Info]2580/3600 | Plates found: 26 | Vehicles completed: 17
+[Info]2640/3600 | Plates found: 27 | Vehicles completed: 18
+[Info]2700/3600 | Plates found: 28 | Vehicles completed: 19
+[Info]2760/3600 | Plates found: 29 | Vehicles completed: 20
+[Info]2820/3600 | Plates found: 29 | Vehicles completed: 20
+[Info]2880/3600 | Plates found: 29 | Vehicles completed: 20
+[Info]2940/3600 | Plates found: 29 | Vehicles completed: 20
+[Info]3000/3600 | Plates found: 29 | Vehicles completed: 20
+[Info]3060/3600 | Plates found: 29 | Vehicles completed: 20
+[Info]3120/3600 | Plates found: 30 | Vehicles completed: 21
+[Info]3180/3600 | Plates found: 31 | Vehicles completed: 22
+[Info]3240/3600 | Plates found: 31 | Vehicles completed: 22
+[Info]3300/3600 | Plates found: 31 | Vehicles completed: 22
+[Info]3360/3600 | Plates found: 31 | Vehicles completed: 22
+[Info]3420/3600 | Plates found: 32 | Vehicles completed: 23
+[Info]3480/3600 | Plates found: 32 | Vehicles completed: 23
+[Info]3540/3600 | Plates found: 32 | Vehicles completed: 23
+[Info]0/3600 | Plates found: 32 | Vehicles completed: 23
 
 [CLEANUP] Stopping pipeline...
-[FINAL] Saved 1 remaining vehicles as partial plates
 
 ============================================================
 PERFORMANCE SUMMARY
 ============================================================
 Total frames:     3600
-Processing time:  139.30s
-Average FPS:      25.84
-Stable plates (high confidence):   33
-Partial plates (brief appearance): 3
-Total unique plate texts:          36
+Processing time:  136.40s
+Average FPS:      26.39
+Stable plates (high confidence):   30
+Partial plates (brief appearance): 10
+Total unique plate texts:          40
 ------------------------------------------------------------
 STABLE PLATES (>= 5 consistent readings):
-  0T06WQ0 (Vehicle #137, 24 readings) [LOCKED]
-  0TE2VXJ (Vehicle #34, 82 readings) [LOCKED]
-  AF65JKU (Vehicle #32, 24 readings) [COMPLETED]
-  AK64DMU (Vehicle #35, 394 readings) [LOCKED]
-  AK64DVU (Vehicle #49, 12 readings) [LOCKED]
-  AO05JE0 (Vehicle #8, 12 readings) [COMPLETED]
-  AUD8HUF (Vehicle #29, 15 readings) [COMPLETED]
-  BG65TRJ (Vehicle #0, 173 readings) [LOCKED]
-[NvMultiObjectTracker] De-initialized
-  BO63L (Vehicle #83, 38 readings) [COMPLETED]
-  CE6VXL (Vehicle #131, 53 readings) [COMPLETED]
-  DAD7CLW (Vehicle #53, 17 readings) [COMPLETED]
-  DF05UKJ (Vehicle #92, 26 readings) [LOCKED]
-  EF0D2S (Vehicle #51, 37 readings) [COMPLETED]
-  EX09UMR (Vehicle #73, 44 readings) [COMPLETED]
-  EX6LNBG (Vehicle #22, 18 readings) [COMPLETED]
-  FJ4YHX (Vehicle #5, 164 readings) [LOCKED]
-  GJ0GEOD (Vehicle #39, 24 readings) [COMPLETED]
-  GW50G (Vehicle #10, 86 readings) [COMPLETED]
-  HNL4C (Vehicle #25, 118 readings) [COMPLETED]
-  HW52BOF (Vehicle #126, 220 readings) [LOCKED]
-  KH0527K (Vehicle #6, 38 readings) [COMPLETED]
-  KH06KRT (Vehicle #46, 46 readings) [COMPLETED]
-  LL6LO2R (Vehicle #96, 33 readings) [COMPLETED]
-  LM3UCU (Vehicle #15, 23 readings) [COMPLETED]
-  LN5YYC (IDs [61, 66] (tracker switched), 88 readings) [COMPLETED]
-  LO4LJA (IDs [106, 129, 134] (tracker switched), 257 readings) [COMPLETED]
-  MM5LURT (Vehicle #9, 15 readings) [COMPLETED]
-  NA3NQT (Vehicle #13, 11 readings) [COMPLETED]
-  NA54KGJ (Vehicle #23, 15 readings) [COMPLETED]
-  NL640GW (IDs [111, 128] (tracker switched), 23 readings) [COMPLETED]
-  RC56DXO (Vehicle #139, 26 readings) [COMPLETED]
-  UQ02FND (Vehicle #14, 99 readings) [COMPLETED]
-  VG652FW (Vehicle #100, 28 readings) [COMPLETED]
+  0VNA (Car #64, 114 readings) [LOCKED]
+  54DMU (Car #17, 75 readings) [COMPLETED]
+  AF65JKU (Car #38, 17 readings) [COMPLETED]
+  AO05JE0 (Car #1, 37 readings) [COMPLETED]
+  AUD8HUF (Car #24, 16 readings) [COMPLETED]
+  BG65TRJ (Van #0, 126 readings) [LOCKED]
+  BO63LXH (Car #83, 175 readings) [LOCKED]
+  CE6LVXL (Car #98, 70 readings) [COMPLETED]
+  DAD7CLW (Car #53, 17 readings) [COMPLETED]
+  EF0DYS (Car #43, 19 readings) [COMPLETED]
+  EX09UMR (Van IDs [70, 74] (tracker switched), 18 readings) [COMPLETED]
+  EX09UXR (Moto #68, 22 readings) [LOCKED]
+  EX6SNBG (Car #19, 17 readings) [COMPLETED]
+  FJ4YHX (Car #22, 49 readings) [COMPLETED]
+  GJ0GEOD (Car #39, 82 readings) [COMPLETED]
+  GW50GJ (Car #2, 228 readings) [LOCKED]
+  HNL4C (Car #25, 122 readings) [LOCKED]
+  KH0527K (Car #7, 167 readings) [COMPLETED]
+  KH06KRT (Car #47, 92 readings) [LOCKED]
+  LM3UCU (Car #8, 19 readings) [LOCKED]
+  LN5770 (Car #26, 24 readings) [COMPLETED]
+  LO14 (Car #102, 57 readings) [COMPLETED]
+  MM5URT (Car #4, 31 readings) [COMPLETED]
+  NA3NQT (Car #3, 13 readings) [COMPLETED]
+  NA54KGJ (Car #34, 12 readings) [COMPLETED]
+  NL640GW (Van IDs [92, 106] (tracker switched), 24 readings) [COMPLETED]
+  RC560XO (Car #121, 26 readings) [COMPLETED]
+  VG652FW (Car #93, 54 readings) [COMPLETED]
+  VQ02FND (Car #18, 108 readings) [LOCKED]
+  VW528OF (Car #112, 126 readings) [COMPLETED]
 ------------------------------------------------------------
 PARTIAL PLATES (brief appearance, lower confidence):
-  GSBRF (2 readings)
-  JLJTO (1 readings)
-  KH0574U (2 readings)
+  0T6HX (Car #33, 1 readings)
+  8DF6 (Car #89, 1 readings)
+  DT0GWQ0 (Car #119, 1 readings)
+  EX09UR (Moto #61, 1 readings)
+  EXD9UNR (Van #60, 4 readings)
+  GD501 (Moto #50, 1 readings)
+  GGO15 (Car #125, 2 readings)
+  J7SA (Van #37, 2 readings)
+  LLGLO2R (Car #69, 2 readings)
+  MMEUJ (Car #99, 1 readings)
 ------------------------------------------------------------
 GPU OPTIMIZATION (Read Once, Skip Later): ENABLED
-  Vehicles completed (total): 28
-  Total skipped:              6676
-  Total processed:            0
-  Skip ratio:                 100.0%
+  Vehicles completed (total): 23
+  Total skipped:              3744
+  Total processed:            20831
+  Skip ratio:                 15.2%
 ------------------------------------------------------------
 HIGH-DENSITY HEURISTICS: ENABLED
-  Density threshold:          8 vehicles
-  Max process per frame:      5
-  High-density activations:   3561
-  Total vehicles filtered:    29143
+  Density threshold:          10 vehicles
+  Max process per frame:      8
+  High-density activations:   24
+  Total vehicles filtered:    72
 ============================================================

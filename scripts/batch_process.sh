@@ -70,7 +70,7 @@ if [ -n "$INPUT_DIR" ] && [ -d "$INPUT_DIR" ]; then
     echo "[BATCH] Output directory: $OUTPUT_DIR"
     
     # Find all video files using find command (more compatible)
-    VIDEO_FILES=$(find "$INPUT_DIR" -maxdepth 1 -type f \( -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mkv" -o -iname "*.mov" \) | sort)
+    VIDEO_FILES=$(find "$INPUT_DIR" -maxdepth 1 -type f \( -iname "video*.mp4" \) | sort)
     VIDEO_COUNT=$(echo "$VIDEO_FILES" | grep -c .)
     
     if [ "$VIDEO_COUNT" -eq 0 ]; then

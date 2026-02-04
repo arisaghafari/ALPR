@@ -218,7 +218,33 @@ from collections import defaultdict, Counter
 # Configuration for stabilization
 PLATE_HISTORY_SIZE = 15       # Number of frames to keep history
 MIN_VOTES_FOR_STABLE = 5      # Minimum votes needed to consider a plate "stable"
-MIN_PLATE_LENGTH = 5          # Minimum plate text length to be valid
+MIN_PLATE_LENGTH = 4          # Minimum plate length (lowered for motorcycles: 4-6 chars)
+
+# Vehicle class labels file path
+VEHICLE_LABELS_FILE = f"{CONFIG_DIR}/DeepStream-Yolo/labels_vehicles.txt"
+
+def load_vehicle_labels(labels_file):
+    """Load vehicle class names from labels file."""
+    labels = {}
+    try:
+        with open(labels_file, 'r') as f:
+            for idx, line in enumerate(f):
+                labels[idx] = line.strip()
+        print(f"Loaded {len(labels)} vehicle labels from {labels_file}")
+    except FileNotFoundError:
+        print(f"Warning: Labels file not found: {labels_file}")
+    return labels
+
+# Load vehicle labels at startup
+VEHICLE_CLASS_NAMES = load_vehicle_labels(VEHICLE_LABELS_FILE)
+
+def get_vehicle_type_name(class_id):
+    """Get human-readable vehicle type name from class ID."""
+    return VEHICLE_CLASS_NAMES.get(class_id, "Vehicle")
+
+# Store vehicle class ID (type) for each tracked vehicle
+# Key: vehicle_track_id, Value: class_id
+vehicle_class_ids = {}
 
 # Store plate recognition history PER VEHICLE (using vehicle's track ID)
 # Key: vehicle_track_id (from parent object)
@@ -447,6 +473,10 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                 if obj_meta.unique_component_id == 1:
                     vehicle_id = obj_meta.object_id
                     
+                    # Store vehicle class/type (car, motorcycle, bus, truck)
+                    if vehicle_id not in vehicle_class_ids:
+                        vehicle_class_ids[vehicle_id] = obj_meta.class_id
+                    
                     # Check if this vehicle was SKIPPED by heuristics
                     heuristics_skipped = get_heuristics_skipped(frame_num)
                     is_skipped_by_heuristics = vehicle_id in heuristics_skipped
@@ -470,7 +500,7 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                             obj_meta.rect_params.border_color.blue = 1.0
                             obj_meta.rect_params.border_color.alpha = 1.0
                             obj_meta.rect_params.border_width = 4  # Thicker border
-                        # For COMPLETED vehicles: GREEN background + locked plate
+                        # For COMPLETED vehicles: GREEN background + GREEN border + locked plate
                         elif skip_manager.is_completed(vehicle_id):
                             # Use LOCKED plate (confirmed text) for completed vehicles
                             stored_plate = vehicle_locked_plates.get(vehicle_id, vehicle_stable_plates.get(vehicle_id, ""))
@@ -484,6 +514,12 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                             else:
                                 obj_meta.text_params.display_text = f"#{vehicle_id}"
                                 obj_meta.text_params.set_bg_clr = 1
+                            # GREEN border for completed vehicles
+                            obj_meta.rect_params.border_color.red = 0.0
+                            obj_meta.rect_params.border_color.green = 0.8
+                            obj_meta.rect_params.border_color.blue = 0.0
+                            obj_meta.rect_params.border_color.alpha = 1.0
+                            obj_meta.rect_params.border_width = 4  # Thicker border
                         else:
                             # Not stable yet - show just the ID
                             obj_meta.text_params.display_text = f"#{vehicle_id}"
@@ -1125,12 +1161,17 @@ def main():
                         else:
                             status = "[STABLE]"
                     
-                    # Format vehicle IDs (deduplicated display)
+                    # Format vehicle IDs with type (deduplicated display)
                     if len(vehicle_ids) == 1:
-                        vid_str = f"Vehicle #{vehicle_ids[0]}"
+                        vid = vehicle_ids[0]
+                        vtype = get_vehicle_type_name(vehicle_class_ids.get(vid, -1))
+                        vid_str = f"{vtype} #{vid}"
                     else:
-                        # Multiple IDs = tracker switched (same physical car)
-                        vid_str = f"IDs {sorted(vehicle_ids)} (tracker switched)"
+                        # Multiple IDs = tracker switched (same physical vehicle)
+                        # Get the most common vehicle type
+                        types = [get_vehicle_type_name(vehicle_class_ids.get(v, -1)) for v in vehicle_ids]
+                        most_common_type = Counter(types).most_common(1)[0][0]
+                        vid_str = f"{most_common_type} IDs {sorted(vehicle_ids)} (tracker switched)"
                     
                     print(f"  {plate_text} ({vid_str}, {total_reads} readings) {status}")
             
@@ -1145,11 +1186,15 @@ def main():
                     total_readings = data['count']
                     vehicle_ids = data['vehicles']
                     if len(vehicle_ids) == 1:
-                        print(f"  {plate_text} (Vehicle #{vehicle_ids[0]}, {total_readings} readings)")
+                        vid = vehicle_ids[0]
+                        vtype = get_vehicle_type_name(vehicle_class_ids.get(vid, -1))
+                        print(f"  {plate_text} ({vtype} #{vid}, {total_readings} readings)")
                     else:
                         # Multiple vehicle IDs = tracker switched
+                        types = [get_vehicle_type_name(vehicle_class_ids.get(v, -1)) for v in vehicle_ids]
+                        most_common_type = Counter(types).most_common(1)[0][0]
                         vid_str = ", ".join(f"#{v}" for v in sorted(vehicle_ids))
-                        print(f"  {plate_text} (Vehicles {vid_str}, {total_readings} readings)")
+                        print(f"  {plate_text} ({most_common_type}s {vid_str}, {total_readings} readings)")
             
             # Calculate unique plates (by text, not by vehicle)
             # partial_only already excludes stable plates, so this is the true unique count

@@ -70,23 +70,25 @@ class SkipLogicManager:
         """Get number of completed vehicles."""
         return len(self.completed_vehicles)
     
-    def shrink_bbox_for_skip(self, obj_meta, frame_num):
+    def shrink_bbox_for_skip(self, obj_meta, frame_num, force=False):
         """
         Shrink a vehicle's bbox so SGIE skips it.
         
-        Call this in pre-SGIE probe for completed vehicles.
+        Call this in pre-SGIE probe for completed vehicles or heuristics-filtered vehicles.
         Stores original bbox for later restoration.
         
         Args:
             obj_meta: NvDsObjectMeta for the vehicle
             frame_num: Current frame number
+            force: If True, shrink even if not completed (for heuristics filtering)
             
         Returns:
             True if bbox was shrunk, False otherwise
         """
         vehicle_id = obj_meta.object_id
         
-        if vehicle_id not in self.completed_vehicles:
+        # Skip if not completed and not forced
+        if not force and vehicle_id not in self.completed_vehicles:
             return False
         
         # Store original bbox
@@ -95,9 +97,10 @@ class SkipLogicManager:
             rect.left, rect.top, rect.width, rect.height
         )
         
-        # Shrink bbox below SGIE's min threshold
-        rect.width = 1
-        rect.height = 1
+        # Shrink bbox below SGIE's min threshold (input-object-min-width/height)
+        # Use 8x8 to avoid CUDA buffer copy errors with tiny regions
+        rect.width = 8
+        rect.height = 8
         
         self.stats['total_skipped'] += 1
         return True
@@ -305,12 +308,18 @@ def create_pre_sgie_probe(skip_manager, heuristics_manager=None, completed_vehic
                 for f in old_frames:
                     heuristics_skipped_vehicles.pop(f, None)
             
-            # PHASE 3: Apply skip logic (shrink bboxes) AND visual markers
+            # PHASE 3: Apply skip logic (shrink bboxes) AND track stats
             for vehicle_id, obj_meta in vehicles_in_frame:
-                should_skip = skip_manager.is_completed(vehicle_id) or vehicle_id in vehicles_to_skip
+                is_completed = skip_manager.is_completed(vehicle_id)
+                is_heuristics_skip = vehicle_id in vehicles_to_skip
+                should_skip = is_completed or is_heuristics_skip
                 
                 if should_skip:
-                    skip_manager.shrink_bbox_for_skip(obj_meta, frame_num)
+                    # Use force=True to skip even if not completed (heuristics case)
+                    skip_manager.shrink_bbox_for_skip(obj_meta, frame_num, force=True)
+                else:
+                    # Vehicle will be processed by SGIE - increment processed counter
+                    skip_manager.stats['total_processed'] += 1
                 
                 # Note: Visual markers are applied in the OSD probe (after this)
                 # because they would be overwritten here anyway
