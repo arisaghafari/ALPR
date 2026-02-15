@@ -2,7 +2,7 @@
 gpu-id=0
 net-scale-factor=0.0039215697906911373
 model-color-format=0
-onnx-file=license-plate-finetune-v1n_320.onnx
+onnx-file=last.onnx
 model-engine-file=model_b8_gpu0_fp16.engine
 labelfile-path=labels_lpd.txt
 parse-bbox-func-name=NvDsInferParseYolo

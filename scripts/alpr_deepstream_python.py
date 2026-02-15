@@ -326,7 +326,7 @@ def get_stable_plate_for_vehicle(vehicle_id, new_plate_text, current_frame):
         # Return most common even if below threshold
         return most_common_plate
 
-def cleanup_old_vehicles(current_frame, max_frames_missing=90):
+def cleanup_old_vehicles(current_frame, max_frames_missing=60):
     """Remove history for vehicles that haven't been seen recently.
     Saves partial plates for vehicles that didn't reach stable threshold."""
     global vehicle_plate_history, vehicle_stable_plates, vehicle_last_seen
@@ -404,7 +404,7 @@ plate_scorer = PlateVehicleScorer()
 skip_manager = SkipLogicManager(
     min_confident_readings=4,       # Additional readings needed AFTER stable (total: 5+4=9)
     min_plate_length=MIN_PLATE_LENGTH,  # Same as stabilization check
-    max_frames_missing=90           # Cleanup threshold
+    max_frames_missing=60           # Cleanup threshold (more aggressive for GPU memory)
 )
 
 # High-density traffic heuristics (filter vehicles when too many in frame)
@@ -659,8 +659,8 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
             except Exception:
                 pass
         
-        # Cleanup old tracks periodically (saves partial plates for vehicles that left)
-        if frame_count % 60 == 0:
+        # Cleanup old tracks periodically (every 30 frames for more aggressive GPU memory release)
+        if frame_count % 30 == 0:
             cleanup_old_vehicles(frame_count)
             # Show cumulative stats (unique plates = unique vehicles with plates)
             total_plates = len(total_plates_by_vehicle)
@@ -762,7 +762,9 @@ def main():
     demuxer = create_element("qtdemux", "demuxer")
     
     # H264 Parser
+    ###encoder format 
     h264parser = create_element("h264parse", "h264-parser")
+    #h264parser = create_element("h265parse", "h265-parser")
     
     # Decoder (nvv4l2decoder for Jetson)
     decoder = create_element("nvv4l2decoder", "nvv4l2-decoder")

@@ -1,6 +1,16 @@
 # DeepStream ALPR Pipeline - Python Binding
 
-Python implementation of the DeepStream ALPR (Automatic License Plate Recognition) pipeline for Jetson Orin.
+Real-time Automatic License Plate Recognition (ALPR) system built with NVIDIA DeepStream SDK 7.1, featuring intelligent GPU optimization and high-density traffic handling.
+
+## Features
+
+- **Multi-Stage Inference Pipeline**: Vehicle detection → Plate detection → Plate recognition
+- **Real-time Object Tracking**: NvSORT tracker for stable vehicle tracking across frames
+- **Voting-based Plate Stabilization**: Reduces OCR noise through majority voting
+- **GPU Optimization**: "Read Once, Skip Later" - skips inference for completed vehicles
+- **High-Density Heuristics**: Smart vehicle prioritization when traffic is congested
+- **Multiple Output Modes**: File output, RTSP streaming, or display
+- **Visual Status Indicators**: Color-coded bounding boxes for processing status
 
 ## Pipeline Architecture
 
@@ -15,11 +25,18 @@ Python implementation of the DeepStream ALPR (Automatic License Plate Recognitio
 │                                                                          │          │
 │  ┌───────────────────────────────────────────────────────────────────────▼───────┐  │
 │  │                           INFERENCE CHAIN                                      │  │
-│  │  ┌─────────────────┐   ┌───────────────┐   ┌─────────────────┐   ┌──────────┐ │  │
-│  │  │ PGIE (YOLO11)   │──▶│ nvtracker     │──▶│ SGIE-Plate      │──▶│ SGIE-LPR │ │  │
-│  │  │ Vehicle Detect  │   │ NvSORT        │   │ (YOLO11)        │   │ (LPRNet) │ │  │
-│  │  │ gie-id=1        │   │               │   │ gie-id=2        │   │ gie-id=3 │ │  │
-│  │  └─────────────────┘   └───────────────┘   └─────────────────┘   └──────────┘ │  │
+│  │                                                                                │  │
+│  │  ┌─────────────────┐   ┌───────────────┐   ┌─────────────────┐                │  │
+│  │  │ PGIE (YOLOv11)  │──▶│ nvtracker     │──▶│ Pre-SGIE Probe  │                │  │
+│  │  │ Vehicle Detect  │   │ NvSORT        │   │ (Skip Logic +   │                │  │
+│  │  │ gie-id=1        │   │               │   │  Heuristics)    │                │  │
+│  │  └─────────────────┘   └───────────────┘   └────────┬────────┘                │  │
+│  │                                                     │                          │  │
+│  │                              ┌──────────────────────▼──────────────────────┐   │  │
+│  │                              │  SGIE (YOLOv11)  │  TGIE (LPRNet)          │   │  │
+│  │                              │  Plate Detection │  Plate Recognition      │   │  │
+│  │                              │  gie-id=2        │  gie-id=3               │   │  │
+│  │                              └──────────────────────────────────────────────┘   │  │
 │  └───────────────────────────────────────────────────────────────────────┬───────┘  │
 │                                                                          │          │
 │  ┌───────────────────────────────────────────────────────────────────────▼───────┐  │
@@ -31,67 +48,68 @@ Python implementation of the DeepStream ALPR (Automatic License Plate Recognitio
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Files
+## Project Structure
 
-| File | Description |
-|------|-------------|
-| `alpr_deepstream_python.py` | Main ALPR pipeline with File/RTSP output options |
-| `plate_association/` | Module for plate-vehicle association algorithms |
-| `plate_association/scoring.py` | Multi-factor scoring for plate-vehicle matching |
-| `plate_association/grid_lookup.py` | Spatial grid for O(1) vehicle lookup |
-| `plate_association/skip_logic.py` | "Read Once, Skip Later" GPU optimization |
-
-## Requirements
-
-- Jetson Orin with JetPack 6.x
-- DeepStream SDK 7.1
-- Python 3.x with DeepStream Python bindings (pyds)
-- GStreamer Python bindings (gi)
-
-## Installation
-
-### 1. Ensure DeepStream Python bindings are installed
-
-```bash
-# Check if pyds is available
-python3 -c "import pyds; print('pyds version:', pyds.__version__)"
+```
+alpr_project/
+├── scripts/
+│   ├── alpr_deepstream_python.py      # Main ALPR pipeline
+│   └── plate_association/             # Optimization modules
+│       ├── __init__.py
+│       ├── scoring.py                 # Plate-vehicle association scoring
+│       ├── grid_lookup.py             # Spatial grid for O(1) lookup
+│       ├── skip_logic.py              # "Read Once, Skip Later" optimization
+│       └── heuristics.py              # High-density traffic handling
+│
+└── DeepStream-Yolo/
+    ├── config_infer_primary_yolo11.txt    # PGIE config (vehicle detection)
+    ├── config_infer_secondary_yolo11.txt  # SGIE config (plate detection)
+    ├── config_infer_tertiary_lprnet.txt   # TGIE config (plate recognition)
+    ├── labels.txt                         # Vehicle class labels
+    ├── labels_lpd.txt                     # License plate labels
+    ├── dict.txt                           # LPR character dictionary
+    └── nvdsinfer_custom_impl_Yolo/        # Custom YOLO parser library
+        └── libnvdsinfer_custom_impl_Yolo.so
 ```
 
-If not installed, install from the DeepStream SDK:
+## Technologies Used
 
-```bash
-cd /opt/nvidia/deepstream/deepstream-7.1/sources/deepstream_python_apps/
-pip3 install ./pyds-*.whl
-```
-
-### 2. Copy config files to project directory
-
-Ensure these config files are in your project directory:
-- `config_infer_primary_yolo11.txt`
-- `config_infer_secondary_yolo11.txt`
-- `config_infer_tertiary_lprnet.txt`
-
-Along with model files:
-- `yolo11n.onnx` (or engine file)
-- `license-plate-finetune-v1n_320.onnx` (or engine file)
-- `us_lprnet_baseline18_deployable.etlt`
-- Label files: `labels.txt`, `labels_lpd.txt`, `dict.txt`
-- Custom library: `nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so`
-- LPR library: `libnvdsinfer_custom_impl_lpr.so`
+| Category | Technology |
+|----------|------------|
+| **SDK** | NVIDIA DeepStream 7.1 |
+| **Framework** | GStreamer |
+| **Inference** | TensorRT, CUDA |
+| **Detection** | YOLOv8/YOLOv11 |
+| **Recognition** | LPRNet |
+| **Tracking** | NvSORT |
+| **Language** | Python 3.x (pyds bindings) |
 
 ## Usage
 
-### Basic Usage (File Output)
+### Basic Usage
 
 ```bash
-cd /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project
+cd /opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/scripts
 
-# Run with default settings (saves to file)
+# Run with default settings
 python3 alpr_deepstream_python.py
 
-# Custom input/output paths
-python3 alpr_deepstream_python.py -i /path/to/input.mp4 -o /path/to/output.mp4
+# Custom input/output
+python3 alpr_deepstream_python.py -i /path/to/video.mp4 -o /path/to/output.mp4
 ```
+
+### Command Line Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-i`, `--input` | Input video file path | `sample.mp4` |
+| `-o`, `--output` | Output video path | `output_video_python.mp4` |
+| `--live` | Enable live mode (live-source=1) | disabled |
+| `--rtsp` | Enable RTSP streaming output | disabled |
+| `--rtsp-port` | RTSP server port | `8554` |
+| `--rtsp-name` | RTSP stream name | `alpr-stream` |
+| `--no-skip` | Disable GPU optimization | enabled |
+| `--no-heuristics` | Disable high-density heuristics | enabled |
 
 ### RTSP Streaming
 
@@ -102,140 +120,86 @@ python3 alpr_deepstream_python.py --rtsp
 # Custom RTSP settings
 python3 alpr_deepstream_python.py --rtsp --rtsp-port 8555 --rtsp-name my-stream
 
-# Live mode with RTSP
-python3 alpr_deepstream_python.py --live --rtsp
+# View stream: rtsp://<IP>:8555/my-stream
 ```
 
-### Command Line Options
+## GPU Optimization Features
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-i`, `--input` | Input video file path | `sample.mp4` |
-| `-o`, `--output` | Output video path | `output_video_python.mp4` |
-| `--live` | Enable live mode (sets live-source=1) | disabled |
-| `--rtsp` | Enable RTSP streaming output | disabled |
-| `--rtsp-port` | RTSP server port | `8554` |
-| `--rtsp-name` | RTSP stream name | `alpr-stream` |
+### 1. Read Once, Skip Later
 
-## Configuration Mapping
+Once a vehicle's plate is successfully read and confirmed (via voting), the system skips further inference for that vehicle.
 
-### deepstream_app_config.txt → Python Code
+**How it works:**
+1. Vehicle plate is read multiple times (voting)
+2. When plate reaches `MIN_VOTES_FOR_STABLE` (5), it's "locked"
+3. After `COMPLETION_THRESHOLD` (8) consistent readings, vehicle is "completed"
+4. Completed vehicles' bboxes are shrunk below SGIE threshold (8×8 < 30×30)
+5. SGIE automatically skips these vehicles → GPU saved
 
-| Config Section | Python Equivalent |
-|----------------|-------------------|
-| `[source0]` | `filesrc` + `qtdemux` + `h264parse` + `nvv4l2decoder` |
-| `[streammux]` | `nvstreammux` with properties |
-| `[primary-gie]` | `nvinfer` with `config-file-path` |
-| `[tracker]` | `nvtracker` with properties |
-| `[secondary-gie0]` | `nvinfer` (plate detector) |
-| `[secondary-gie1]` | `nvinfer` (LPR classifier) |
-| `[osd]` | `nvdsosd` with properties |
-| `[sink0]` (file) | `nvvideoconvert` + `nvv4l2h264enc` + `qtmux` + `filesink` |
-| `[sink0]` (rtsp) | `nvvideoconvert` + encoder + `rtph264pay` + RTSP server |
+### 2. High-Density Heuristics
 
-### Key Property Mappings
+When many vehicles are present, the system intelligently prioritizes which vehicles to process.
 
+**Activation:**
+- Triggers when non-completed vehicles > `HIGH_DENSITY_THRESHOLD` (10)
+- Processes only top `MAX_PROCESS_PER_FRAME` (8) vehicles
+
+**Priority Scoring:**
+```
+Score = 0.45 × SIZE + 0.30 × POSITION + 0.25 × FRESHNESS
+
+SIZE:      Larger vehicles (closer) score higher
+POSITION:  Center-bottom of frame scores higher
+FRESHNESS: Vehicles waiting long get priority boost (fairness)
+```
+
+**Priority Zones:**
+```
+┌────────────────────────────┐
+│      ZONE C (Top 30%)      │  ← Low priority (far away)
+├────────────────────────────┤
+│     ZONE B (Middle 30%)    │  ← Medium priority
+├────────────────────────────┤
+│    ZONE A (Bottom 40%)     │  ← High priority (close)
+└────────────────────────────┘
+```
+
+## Visual Indicators
+
+The output video uses color-coded bounding boxes:
+
+| Color | Border | Status | Meaning |
+|-------|--------|--------|---------|
+| **Red** | Default | Processing | Plate not yet read |
+| **Blue** | Thick | `[SKIP]` | Skipped by heuristics (low priority) |
+| **Green** | Thick | Completed | Plate successfully read & confirmed |
+
+## Output Format
+
+### Console Progress
+
+```
+[Info]300/3600 | Plates found: 8 | Vehicles completed: 5
+[Info]600/3600 | Plates found: 12 | Vehicles completed: 8
+```
+
+## Configuration
+
+### Adjustable Parameters
+
+In `alpr_deepstream_python.py`:
 ```python
-# Streammux (from [streammux])
-streammux.set_property("width", 1280)              # width=1280
-streammux.set_property("height", 720)              # height=720
-streammux.set_property("batch-size", 1)            # batch-size=1
-streammux.set_property("batched-push-timeout", 40000)  # batched-push-timeout=40000
-streammux.set_property("live-source", 0)           # live-source=0
-
-# Tracker (from [tracker])
-tracker.set_property("tracker-width", 640)         # tracker-width=640
-tracker.set_property("tracker-height", 384)        # tracker-height=384
-tracker.set_property("ll-lib-file", "...")         # ll-lib-file=...
-tracker.set_property("ll-config-file", "...")      # ll-config-file=...
-
-# OSD (from [osd])
-osd.set_property("process-mode", 0)                # process-mode=0 (CPU)
-osd.set_property("display-text", 1)                # display-text=1
-osd.set_property("display-bbox", 1)                # display-bbox=1
+PLATE_HISTORY_SIZE = 15       # Frames to keep in voting history
+MIN_VOTES_FOR_STABLE = 5      # Votes needed for stable plate
+MIN_PLATE_LENGTH = 4          # Minimum valid plate length
+COMPLETION_THRESHOLD = 8      # Readings to mark vehicle complete
 ```
 
-## Output
-
-### Console Output
-
+In `plate_association/heuristics.py`:
+```python
+HIGH_DENSITY_THRESHOLD = 10   # Vehicles to trigger heuristics
+MAX_PROCESS_PER_FRAME = 8     # Max vehicles to process when active
+WEIGHT_SIZE = 0.45            # Weight for vehicle size
+WEIGHT_POSITION = 0.30        # Weight for position
+WEIGHT_FRESHNESS = 0.25       # Weight for waiting time
 ```
-[ALPR] Starting DeepStream ALPR Pipeline...
-[ALPR] Mode: FILE
-[ALPR] Output: File
-[ALPR] GPU optimization enabled: Read Once, Skip Later
-[ALPR] Input:  /path/to/sample.mp4
-[ALPR] Output: /path/to/output.mp4
-[ALPR] Processing... (Press Ctrl+C to stop)
-[Info]150/3600 | Completed: 5 | Skip ratio: 23.4%
-[Info]300/3600 | Completed: 8 | Skip ratio: 35.2%
-```
-
-### Final Statistics
-
-```
-[CLEANUP] Stopping pipeline...
-[DONE] Processed 3600 frames in 120.45s (Avg FPS: 29.89)
-```
-
-### GPU Optimization Stats
-
-The "Read Once, Skip Later" algorithm shows:
-- **Completed**: Number of vehicles whose plates have been read
-- **Skip ratio**: Percentage of GPU processing saved
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Unable to create element"**
-   - Ensure DeepStream SDK is properly installed
-   - Check GStreamer plugins: `gst-inspect-1.0 <element-name>`
-
-2. **"pyds module not found"**
-   - Install DeepStream Python bindings from SDK
-
-3. **"Failed to link elements"**
-   - Check element capabilities: `gst-inspect-1.0 <element>`
-   - Verify memory types are compatible
-
-4. **"Engine file not found" or model errors**
-   - First run will generate engine files (takes time)
-   - Ensure ONNX/ETLT model files exist
-   - Check custom library paths
-
-5. **Low FPS**
-   - Reduce input resolution in streammux
-   - Use smaller batch sizes
-   - Adjust inference intervals
-
-### Debug Mode
-
-Enable GStreamer debug output:
-
-```bash
-export GST_DEBUG=3
-python3 alpr_deepstream_python.py
-```
-
-For more detailed nvinfer debug:
-
-```bash
-export GST_DEBUG=nvinfer:5
-python3 alpr_deepstream_python.py
-```
-
-## Comparison with deepstream-app
-
-| Feature | deepstream-app | Python Binding |
-|---------|----------------|----------------|
-| Configuration | Text files | Code + Text files |
-| Customization | Limited | Full Python access |
-| Metadata access | Via callbacks | Probe functions |
-| Output flexibility | Config-based | Programmatic |
-| Debugging | GStreamer logs | Python debugging |
-| Performance | Optimized | Slightly lower (probe overhead) |
-
-## License
-
-This code is provided for educational purposes. Ensure compliance with NVIDIA DeepStream SDK license terms.

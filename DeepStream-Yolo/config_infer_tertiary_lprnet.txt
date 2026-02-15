@@ -3,10 +3,11 @@ gpu-id=0
 net-scale-factor=0.0039215697906911373
 
 # --- MODEL FILES ---
-tlt-encoded-model=us_lprnet_baseline18_deployable.etlt
+#tlt-encoded-model=lprnet_european_1518.etlt.onnx
+onnx-file=lprnet_european_1518.etlt.onnx
 labelfile-path=dict.txt
-model-engine-file=us_lprnet_baseline18_deployable.etlt_b8_gpu0_fp16.engine
-tlt-model-key=nvidia_tlt
+model-engine-file=lprnet_european_1518.etlt.onnx_b8_gpu0_fp16.engine
+#tlt-model-key=nvidia_tlt
 
 custom-lib-path=libnvdsinfer_custom_impl_lpr.so
 parse-classifier-func-name=NvDsInferParseCustomNVPlate
