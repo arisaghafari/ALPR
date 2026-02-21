@@ -223,4 +223,3 @@ class PlateVehicleScorer:
             return best_vehicle_id, best_score
         
         return 0, 0.0
-

@@ -29,11 +29,11 @@ class HighDensityHeuristics:
     MAX_PROCESS_PER_FRAME = 8       # Max vehicles to send to SGIE in high density
     MAX_PROCESS_NORMAL = 50          # Max in normal mode
     
-    # Scoring weights (must sum to 1.0)
-    # Note: All vehicles in queue are non-completed (completed are pre-filtered)
-    WEIGHT_SIZE = 0.45               # Larger vehicles score higher (closer = better plate visibility)
-    WEIGHT_POSITION = 0.30           # Center-bottom scores higher (optimal viewing angle)
-    WEIGHT_FRESHNESS = 0.25          # Vehicles waiting long get priority (fairness)
+    # Scoring weights
+    WEIGHT_SIZE = 0.35               # Larger vehicles score higher
+    WEIGHT_POSITION = 0.25           # Center-bottom scores higher  
+    WEIGHT_FRESHNESS = 0.20          # New vehicles get slight priority
+    WEIGHT_NOT_COMPLETED = 0.20      # Uncompleted vehicles score higher
     
     # Zone definitions (as fraction of frame height)
     ZONE_A_START = 0.6               # Bottom 40% = Zone A (high priority)
@@ -78,21 +78,21 @@ class HighDensityHeuristics:
         else:
             return 'C'  # Top - far away, low priority
     
-    def calculate_priority_score(self, vehicle_id, bbox, max_vehicle_area=None):
+    def calculate_priority_score(self, vehicle_id, bbox, completed_vehicles, 
+                                  max_vehicle_area=None):
         """
         Calculate priority score for a vehicle (higher = process first).
-        
-        Note: Only non-completed vehicles are scored (completed are pre-filtered).
         
         Args:
             vehicle_id: Vehicle tracker ID
             bbox: Vehicle bounding box (object with left, top, width, height)
+            completed_vehicles: Set of completed vehicle IDs
             max_vehicle_area: Largest vehicle area in frame (for normalization)
             
         Returns:
             Priority score between 0.0 and 1.0
         """
-        # Size score (larger = better plate visibility)
+        # Size score (larger = better)
         vehicle_area = bbox.width * bbox.height
         if max_vehicle_area and max_vehicle_area > 0:
             size_score = min(1.0, vehicle_area / max_vehicle_area)
@@ -101,7 +101,7 @@ class HighDensityHeuristics:
             typical_area = 200 * 150  # 200x150 pixels
             size_score = min(1.0, vehicle_area / typical_area)
         
-        # Position score (center-bottom = best viewing angle)
+        # Position score (center-bottom = best)
         vehicle_cx = bbox.left + bbox.width / 2
         vehicle_cy = bbox.top + bbox.height / 2
         
@@ -109,20 +109,24 @@ class HighDensityHeuristics:
         horizontal_center = abs(vehicle_cx - self.frame_width / 2) / (self.frame_width / 2)
         horizontal_score = 1.0 - (horizontal_center * 0.5)
         
-        # Vertical: bottom is best (closer to camera)
+        # Vertical: bottom is best
         vertical_score = vehicle_cy / self.frame_height
         
         position_score = (horizontal_score + vertical_score) / 2
         
-        # Freshness score (vehicles waiting too long get boosted for fairness)
+        # Freshness score (vehicles waiting too long get boosted)
         wait_frames = self.frames_since_processed.get(vehicle_id, 0)
         freshness_score = min(1.0, wait_frames / 30)  # Max boost after 30 frames
         
-        # Weighted combination (weights sum to 1.0)
+        # Completion score (uncompleted = higher priority)
+        completion_score = 0.0 if vehicle_id in completed_vehicles else 1.0
+        
+        # Weighted combination
         total_score = (
             self.WEIGHT_SIZE * size_score +
             self.WEIGHT_POSITION * position_score +
-            self.WEIGHT_FRESHNESS * freshness_score
+            self.WEIGHT_FRESHNESS * freshness_score +
+            self.WEIGHT_NOT_COMPLETED * completion_score
         )
         
         return total_score
@@ -159,10 +163,12 @@ class HighDensityHeuristics:
         # Calculate max vehicle area for normalization
         max_area = max((b.width * b.height for _, b in vehicles), default=1)
         
-        # Score all vehicles (all are non-completed at this point)
+        # Score all vehicles
         scored_vehicles = []
         for vehicle_id, bbox in vehicles:
-            score = self.calculate_priority_score(vehicle_id, bbox, max_area)
+            score = self.calculate_priority_score(
+                vehicle_id, bbox, completed_vehicles, max_area
+            )
             scored_vehicles.append((score, vehicle_id, bbox))
         
         # Sort by score (highest first)

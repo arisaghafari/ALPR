@@ -145,4 +145,3 @@ class SpatialGrid:
             'total_entries': total_entries,
             'avg_per_cell': avg_per_cell
         }
-
