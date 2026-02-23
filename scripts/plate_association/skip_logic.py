@@ -27,7 +27,7 @@ class SkipLogicManager:
     """
     
     def __init__(self, min_confident_readings=6, min_plate_length=7, 
-                 max_frames_missing=90):
+                 max_frames_missing=60):
         """
         Initialize the skip logic manager.
         
@@ -101,6 +101,10 @@ class SkipLogicManager:
         
         self.stats['total_skipped'] += 1
         return True
+    
+    def record_processed(self):
+        """Record that a vehicle was processed (not skipped) by SGIE."""
+        self.stats['total_processed'] += 1
     
     def restore_bbox(self, obj_meta, frame_num):
         """
@@ -311,6 +315,8 @@ def create_pre_sgie_probe(skip_manager, heuristics_manager=None, completed_vehic
                 
                 if should_skip:
                     skip_manager.shrink_bbox_for_skip(obj_meta, frame_num)
+                else:
+                    skip_manager.record_processed()
                 
                 # Note: Visual markers are applied in the OSD probe (after this)
                 # because they would be overwritten here anyway

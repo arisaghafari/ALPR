@@ -14,10 +14,10 @@ nvbuf-memory-type=3
 [source0]
 enable=1
 type=3
-uri=file:///opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/input_videos/video_0.mp4
+uri=file:///opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project/input_videos/video_3.mp4
 num-sources=1
 gpu-id=0
-cudadec-memtype=2
+cudadec-memtype=0
 
 #[sink0]
 #enable=1
@@ -73,10 +73,10 @@ batch-size=1
 batched-push-timeout=40000
 width=1920
 height=1080
-# Stop creating extra empty buffers (Default is often 4)
-buffer-pool-size=4
+buffer-pool-size=16
 enable-padding=1
 nvbuf-memory-type=0
+compute-hw=1
 
 [tracker]
 enable=1
@@ -102,14 +102,14 @@ config-file=config_infer_secondary_yolo11.txt
 gie-unique-id=2
 operate-on-gie-id=1
 #operate-on-class-ids=2;3;5;7
-batch-size=8
+batch-size=4
 interval=0
 
 [secondary-gie1]
 enable=1
 config-file=config_infer_tertiary_lprnet.txt
 gpu-id=0
-batch-size=8
+batch-size=4
 interval=0
 gie-unique-id=3
 ## Listen to the Plate Detector (2)

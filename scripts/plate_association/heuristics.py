@@ -17,23 +17,22 @@ class HighDensityHeuristics:
     """
     Manages vehicle prioritization in high-density traffic.
     
+    Only non-completed vehicles are scored (completed ones are filtered out earlier).
     Scoring factors:
     - Vehicle size (larger = closer = better plate visibility)
     - Position (center-bottom = optimal viewing angle)
-    - Time in frame (longer = more chances, but don't starve new ones)
-    - Not yet completed (prioritize unknowns)
+    - Freshness (vehicles waiting long get boosted for fairness)
     """
     
-    # Thresholds
-    HIGH_DENSITY_THRESHOLD = 10      # More than this = high density mode
-    MAX_PROCESS_PER_FRAME = 8       # Max vehicles to send to SGIE in high density
-    MAX_PROCESS_NORMAL = 50          # Max in normal mode
+    # Thresholds (aligned with SGIE batch-size=4)
+    HIGH_DENSITY_THRESHOLD = 5       # More than this = high density mode
+    MAX_PROCESS_PER_FRAME = 4        # Max vehicles to send to SGIE (matches batch size)
+    MAX_PROCESS_NORMAL = 20          # Max in normal mode (moderate cap)
     
-    # Scoring weights
-    WEIGHT_SIZE = 0.35               # Larger vehicles score higher
-    WEIGHT_POSITION = 0.25           # Center-bottom scores higher  
-    WEIGHT_FRESHNESS = 0.20          # New vehicles get slight priority
-    WEIGHT_NOT_COMPLETED = 0.20      # Uncompleted vehicles score higher
+    # Scoring weights (only non-completed vehicles are scored, so no completion term)
+    WEIGHT_SIZE = 0.45               # Larger vehicles score higher (closer = better visibility)
+    WEIGHT_POSITION = 0.30          # Center-bottom scores higher
+    WEIGHT_FRESHNESS = 0.25          # Vehicles waiting long get priority (fairness)
     
     # Zone definitions (as fraction of frame height)
     ZONE_A_START = 0.6               # Bottom 40% = Zone A (high priority)
@@ -78,15 +77,16 @@ class HighDensityHeuristics:
         else:
             return 'C'  # Top - far away, low priority
     
-    def calculate_priority_score(self, vehicle_id, bbox, completed_vehicles, 
-                                  max_vehicle_area=None):
+    def calculate_priority_score(self, vehicle_id, bbox, max_vehicle_area=None):
         """
         Calculate priority score for a vehicle (higher = process first).
+        
+        Only non-completed vehicles are scored; completed ones are filtered out
+        before heuristics, so no completion term is needed.
         
         Args:
             vehicle_id: Vehicle tracker ID
             bbox: Vehicle bounding box (object with left, top, width, height)
-            completed_vehicles: Set of completed vehicle IDs
             max_vehicle_area: Largest vehicle area in frame (for normalization)
             
         Returns:
@@ -118,26 +118,22 @@ class HighDensityHeuristics:
         wait_frames = self.frames_since_processed.get(vehicle_id, 0)
         freshness_score = min(1.0, wait_frames / 30)  # Max boost after 30 frames
         
-        # Completion score (uncompleted = higher priority)
-        completion_score = 0.0 if vehicle_id in completed_vehicles else 1.0
-        
         # Weighted combination
         total_score = (
             self.WEIGHT_SIZE * size_score +
             self.WEIGHT_POSITION * position_score +
-            self.WEIGHT_FRESHNESS * freshness_score +
-            self.WEIGHT_NOT_COMPLETED * completion_score
+            self.WEIGHT_FRESHNESS * freshness_score
         )
         
         return total_score
     
-    def filter_and_prioritize(self, vehicles, completed_vehicles):
+    def filter_and_prioritize(self, vehicles, completed_vehicles=None):
         """
         Filter and prioritize vehicles for processing.
         
         Args:
-            vehicles: List of (vehicle_id, bbox) tuples
-            completed_vehicles: Set of completed vehicle IDs
+            vehicles: List of (vehicle_id, bbox) tuples (should be non-completed only)
+            completed_vehicles: Unused (kept for API compatibility)
             
         Returns:
             List of (vehicle_id, bbox) tuples to process (sorted by priority)
@@ -166,9 +162,7 @@ class HighDensityHeuristics:
         # Score all vehicles
         scored_vehicles = []
         for vehicle_id, bbox in vehicles:
-            score = self.calculate_priority_score(
-                vehicle_id, bbox, completed_vehicles, max_area
-            )
+            score = self.calculate_priority_score(vehicle_id, bbox, max_area)
             scored_vehicles.append((score, vehicle_id, bbox))
         
         # Sort by score (highest first)

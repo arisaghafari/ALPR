@@ -1,9 +1,10 @@
 [property]
 gpu-id=0
+scaling-compute-hw=1
 net-scale-factor=0.0039215697906911373
 model-color-format=0
-onnx-file=last.onnx
-model-engine-file=model_b8_gpu0_fp16.engine
+onnx-file=finetuned_second_yolo11.onnx
+model-engine-file=model_b4_gpu0_fp16.engine
 labelfile-path=labels_lpd.txt
 parse-bbox-func-name=NvDsInferParseYolo
 engine-create-func-name=NvDsInferYoloCudaEngineGet
@@ -13,9 +14,8 @@ network-type=0
 process-mode=2
 gie-unique-id=2
 operate-on-gie-id=1
-#operate-on-class-ids=2;3;5;7
-operate-on-class-ids=0;1;2;3;4;5;6;7;9
-batch-size=8
+operate-on-class-ids=0;1;2;3;4;5;6
+batch-size=4
 workspace-size=1024
 interval=0
 maintain-aspect-ratio=1
@@ -33,5 +33,5 @@ pre-cluster-threshold=0.4
 topk=1
 nms-iou-threshold=0.35
 
-display-text=0
+#display-text=0
 border-color=0;1;0;1

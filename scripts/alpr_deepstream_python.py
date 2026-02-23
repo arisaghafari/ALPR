@@ -34,6 +34,7 @@ from plate_association import (
     create_pre_sgie_probe, HighDensityHeuristics,
     get_heuristics_skipped, is_heuristics_active
 )
+from plate_association.plate_parser import is_valid_plate_format
 
 # ==============================================================================
 # Configuration - Adjust paths as needed
@@ -67,6 +68,54 @@ RTSP_STREAM_NAME = "alpr-stream"
 # GPU Optimization Control
 # ==============================================================================
 ENABLE_SKIP_LOGIC = True  # --no-skip to disable for comparison
+ENABLE_TIMING = False    # --time to enable latency measurement
+
+# ==============================================================================
+# Timing / Latency Measurement (--time)
+# ==============================================================================
+from collections import deque
+_timing_start_queue = {
+    'pgie': deque(maxlen=100),
+    'sgie_plate': deque(maxlen=100),
+    'sgie_lpr': deque(maxlen=100),
+}
+_timing_latency = {
+    'pgie': {'total_ms': 0.0, 'count': 0},
+    'sgie_plate': {'total_ms': 0.0, 'count': 0},
+    'sgie_lpr': {'total_ms': 0.0, 'count': 0},
+}
+
+def _make_timing_sink_probe(model_name):
+    """Probe on sink pad: record start time when buffer enters."""
+    def probe(pad, info, u_data):
+        if not ENABLE_TIMING:
+            return Gst.PadProbeReturn.OK
+        import time
+        _timing_start_queue[model_name].append(time.perf_counter())
+        return Gst.PadProbeReturn.OK
+    return probe
+
+def _make_timing_src_probe(model_name):
+    """Probe on src pad: compute latency when buffer exits (FIFO with sink)."""
+    def probe(pad, info, u_data):
+        if not ENABLE_TIMING:
+            return Gst.PadProbeReturn.OK
+        import time
+        q = _timing_start_queue[model_name]
+        if q:
+            start = q.popleft()
+            latency_ms = (time.perf_counter() - start) * 1000
+            _timing_latency[model_name]['total_ms'] += latency_ms
+            _timing_latency[model_name]['count'] += 1
+        return Gst.PadProbeReturn.OK
+    return probe
+
+def _get_timing_stats():
+    """Get average latency (ms) per model."""
+    return {
+        name: (d['total_ms'] / d['count'] if d['count'] > 0 else 0.0)
+        for name, d in _timing_latency.items()
+    }
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -118,12 +167,16 @@ Examples:
     parser.add_argument('--no-heuristics', action='store_true',
                         help='Disable high-density heuristics (for comparison)')
     
+    # Timing options
+    parser.add_argument('--time', action='store_true',
+                        help='Measure latency of each inference model and pipeline FPS')
+    
     return parser.parse_args()
 
 def apply_arguments(args):
     """Apply command line arguments to global config."""
     global INPUT_VIDEO, OUTPUT_VIDEO, LIVE_MODE, ENABLE_RTSP, RTSP_PORT, RTSP_STREAM_NAME
-    global ENABLE_SKIP_LOGIC, ENABLE_HEURISTICS, TOTAL_FRAME
+    global ENABLE_SKIP_LOGIC, ENABLE_HEURISTICS, ENABLE_TIMING, TOTAL_FRAME
     
     LIVE_MODE = args.live
     ENABLE_RTSP = args.rtsp
@@ -131,6 +184,7 @@ def apply_arguments(args):
     RTSP_STREAM_NAME = args.rtsp_name
     ENABLE_SKIP_LOGIC = not args.no_skip  # --no-skip disables it
     ENABLE_HEURISTICS = not args.no_heuristics  # --no-heuristics disables it
+    ENABLE_TIMING = args.time
     
     if args.input:
         INPUT_VIDEO = args.input
@@ -224,7 +278,7 @@ from collections import defaultdict, Counter
 # Configuration for stabilization
 PLATE_HISTORY_SIZE = 15       # Number of frames to keep history
 MIN_VOTES_FOR_STABLE = 5      # Minimum votes needed to consider a plate "stable"
-MIN_PLATE_LENGTH = 5          # Minimum plate text length to be valid
+MIN_PLATE_LENGTH = 4          # Minimum plate text length to be valid
 
 # Store plate recognition history PER VEHICLE (using vehicle's track ID)
 # Key: vehicle_track_id (from parent object)
@@ -251,6 +305,9 @@ vehicle_total_readings = defaultdict(int)
 
 # Track last frame each vehicle was seen (for cleanup)
 vehicle_last_seen = {}
+
+# Vehicle type per ID (for final summary display)
+vehicle_type_by_id = {}
 
 # CUMULATIVE stats (not affected by cleanup)
 # Key: vehicle_id, Value: plate_text (ensures one plate per vehicle)
@@ -306,7 +363,7 @@ def get_stable_plate_for_vehicle(vehicle_id, new_plate_text, current_frame):
         # Return most common even if below threshold
         return most_common_plate
 
-def cleanup_old_vehicles(current_frame, max_frames_missing=90):
+def cleanup_old_vehicles(current_frame, max_frames_missing=60):
     """Remove history for vehicles that haven't been seen recently.
     Saves partial plates for vehicles that didn't reach stable threshold."""
     global vehicle_plate_history, vehicle_stable_plates, vehicle_last_seen
@@ -384,7 +441,7 @@ plate_scorer = PlateVehicleScorer()
 skip_manager = SkipLogicManager(
     min_confident_readings=4,       # Additional readings needed AFTER stable (total: 5+4=9)
     min_plate_length=MIN_PLATE_LENGTH,  # Same as stabilization check
-    max_frames_missing=90           # Cleanup threshold
+    max_frames_missing=60           # Cleanup threshold (lower list)
 )
 
 # High-density traffic heuristics (filter vehicles when too many in frame)
@@ -487,6 +544,7 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
         # Clear spatial grid for this frame
         spatial_grid.clear()
         plates_to_process = []
+        vehicle_types_this_frame = {}  # vehicle_id -> vehicle_type (for plate format validation)
         
         # Single pass: build spatial grid, collect plates, restore completed bboxes
         l_obj = frame_meta.obj_meta_list
@@ -552,6 +610,8 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                         obj_meta.text_params.set_bg_clr = 1
                     
                     spatial_grid.add_vehicle(vehicle_id, obj_meta.rect_params)
+                    vehicle_types_this_frame[vehicle_id] = vehicle_type
+                    vehicle_type_by_id[vehicle_id] = vehicle_type
                 
                 # Plates (gie-unique-id=2): Collect for processing
                 elif obj_meta.unique_component_id == 2:
@@ -622,6 +682,10 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                         break
                 
                 if plate_text and len(plate_text) >= MIN_PLATE_LENGTH and parent_id >= 0:
+                    # Format validation: non-Moto vehicles require 2L+3D+2L
+                    vehicle_type = vehicle_types_this_frame.get(parent_id, "")
+                    if not is_valid_plate_format(plate_text, vehicle_type):
+                        continue  # Reject invalid format
                     plate_assignments.append((plate_meta, plate_text, parent_id, score))
             except Exception:
                 pass
@@ -1052,6 +1116,23 @@ def main():
     else:
         print("[ALPR] GPU optimization DISABLED (--no-skip mode for comparison)")
     
+    # Add timing probes (--time) for inference latency measurement
+    if ENABLE_TIMING:
+        pgie_sink = pgie.get_static_pad("sink")
+        pgie_src = pgie.get_static_pad("src")
+        sgie_plate_sink = sgie_plate.get_static_pad("sink")
+        sgie_plate_src = sgie_plate.get_static_pad("src")
+        sgie_lpr_sink = sgie_lpr.get_static_pad("sink")
+        sgie_lpr_src = sgie_lpr.get_static_pad("src")
+        if all([pgie_sink, pgie_src, sgie_plate_sink, sgie_plate_src, sgie_lpr_sink, sgie_lpr_src]):
+            pgie_sink.add_probe(Gst.PadProbeType.BUFFER, _make_timing_sink_probe('pgie'), 0)
+            pgie_src.add_probe(Gst.PadProbeType.BUFFER, _make_timing_src_probe('pgie'), 0)
+            sgie_plate_sink.add_probe(Gst.PadProbeType.BUFFER, _make_timing_sink_probe('sgie_plate'), 0)
+            sgie_plate_src.add_probe(Gst.PadProbeType.BUFFER, _make_timing_src_probe('sgie_plate'), 0)
+            sgie_lpr_sink.add_probe(Gst.PadProbeType.BUFFER, _make_timing_sink_probe('sgie_lpr'), 0)
+            sgie_lpr_src.add_probe(Gst.PadProbeType.BUFFER, _make_timing_src_probe('sgie_lpr'), 0)
+            print("[ALPR] Timing ENABLED: measuring inference latency")
+    
     # Add Main Probe (after OSD, for display and completion tracking)
     osdsinkpad = osd.get_static_pad("sink")
     if not osdsinkpad:
@@ -1127,6 +1208,17 @@ def main():
             print(f"Processing time:  {elapsed:.2f}s")
             print(f"Average FPS:      {fps:.2f}")
             
+            if ENABLE_TIMING:
+                timing_stats = _get_timing_stats()
+                print("-"*60)
+                print("INFERENCE LATENCY (--time)")
+                print("-"*60)
+                print(f"  PGIE (Vehicle Detection):     {timing_stats['pgie']:.2f} ms")
+                print(f"  SGIE Plate (Plate Detection): {timing_stats['sgie_plate']:.2f} ms")
+                print(f"  SGIE LPR (Plate Recognition): {timing_stats['sgie_lpr']:.2f} ms")
+                total_latency = timing_stats['pgie'] + timing_stats['sgie_plate'] + timing_stats['sgie_lpr']
+                print(f"  Total inference latency:      {total_latency:.2f} ms")
+            
             # Count totals - consolidate by plate TEXT to handle tracker issues
             # Group plates by text
             all_plate_texts = set()
@@ -1189,14 +1281,11 @@ def main():
                         else:
                             status = "[STABLE]"
                     
-                    # Format vehicle IDs (deduplicated display)
-                    if len(vehicle_ids) == 1:
-                        vid_str = f"Vehicle #{vehicle_ids[0]}"
-                    else:
-                        # Multiple IDs = tracker switched (same physical car)
-                        vid_str = f"IDs {sorted(vehicle_ids)} (tracker switched)"
-                    
-                    print(f"  {plate_text} ({vid_str}, {total_reads} readings) {status}")
+                    # Format vehicle type (deduplicated display)
+                    type_str = vehicle_type_by_id.get(vehicle_ids[0], "vehicle")
+                    if len(vehicle_ids) > 1:
+                        type_str += " (tracker switched)"
+                    print(f"  {plate_text} ({type_str}, {total_reads} readings) {status}")
             
             # Show partial plates (brief appearances) - EXCLUDE plates already in stable
             # Filter out any plate text that already appears in stable section
@@ -1208,12 +1297,10 @@ def main():
                 for plate_text, data in sorted(partial_only.items()):
                     total_readings = data['count']
                     vehicle_ids = data['vehicles']
-                    if len(vehicle_ids) == 1:
-                        print(f"  {plate_text} (Vehicle #{vehicle_ids[0]}, {total_readings} readings)")
-                    else:
-                        # Multiple vehicle IDs = tracker switched
-                        vid_str = ", ".join(f"#{v}" for v in sorted(vehicle_ids))
-                        print(f"  {plate_text} (Vehicles {vid_str}, {total_readings} readings)")
+                    type_str = vehicle_type_by_id.get(vehicle_ids[0], "vehicle")
+                    if len(vehicle_ids) > 1:
+                        type_str += " (tracker switched)"
+                    print(f"  {plate_text} ({type_str}, {total_readings} readings)")
             
             # Calculate unique plates (by text, not by vehicle)
             # partial_only already excludes stable plates, so this is the true unique count
