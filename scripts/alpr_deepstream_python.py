@@ -462,7 +462,7 @@ heuristics_manager = HighDensityHeuristics(
     frame_width=1920,   # Will be updated from config
     frame_height=1080
 )
-# Note: SGIE min size (50) is configured in config_infer_secondary_yolo11.txt
+# Note: SGIE min size (30) is configured in config_infer_secondary_yolo11.txt
 
 # Create the pre-SGIE probe function
 # Pass heuristics_manager for worst-case high-density filtering (actual GPU savings!)
