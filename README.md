@@ -81,8 +81,8 @@ Scores how well a plate bbox matches a vehicle bbox:
 
 ### `plate_parser.py` — Format Validation
 
-- Cars: 2 letters + 3 digits + 2 letters (e.g. AB123CD)
-- Motorcycles: ≥5 chars
+- **All vehicles except Moto**: Strict format 2 letters + 3 digits + 2 letters (e.g. AB123CD)
+- **Moto only**: No format constraint; length ≥ 4
 
 ## Usage
 
