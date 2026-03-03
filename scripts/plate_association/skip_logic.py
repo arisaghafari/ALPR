@@ -165,6 +165,14 @@ class SkipLogicManager:
         return False
     
     def cleanup(self, current_frame):
+        """
+        Remove tracking data for vehicles no longer in frame.
+        
+        Call periodically (e.g., every 150 frames).
+        
+        Args:
+            current_frame: Current frame number
+        """
         # Find vehicles to remove
         vehicles_to_remove = []
         for vehicle_id, last_frame in self.vehicle_last_seen.items():
@@ -193,9 +201,7 @@ class SkipLogicManager:
         }
 
 
-# Global set to track vehicles skipped by heuristics (for visual display)
-# Key: frame_num, Value: set of vehicle_ids skipped in that frame
-heuristics_skipped_vehicles = {}
+heuristics_skipped_vehicles = {}  # frame_num -> set of vehicle_ids (for blue border display)
 
 def get_heuristics_skipped(frame_num):
     """Get set of vehicle IDs skipped by heuristics in this frame."""
@@ -206,10 +212,9 @@ def is_heuristics_active(frame_num):
     return frame_num in heuristics_skipped_vehicles
 
 
-# Parked: stationary for N frames without completion = far, skip SGIE until they move
-parked_vehicles_for_display = {}  # frame_num -> set of vehicle_ids
-_parked_stationary_count = {}     # vehicle_id -> frames stationary without completion
-FRAMES_TO_FLAG_PARKED = 45        # Stationary this long without completion = parked (~1.5s at 30fps)
+parked_vehicles_for_display = {}  # frame_num -> set of parked vehicle_ids (yellow border)
+_parked_stationary_count = {}     # vehicle_id -> consecutive stationary frames
+FRAMES_TO_FLAG_PARKED = 45        # Frames stationary without stable plate -> parked (~1.5s at 30fps)
 
 def get_parked_vehicles(frame_num):
     """Get set of vehicle IDs that are parked (for yellow border display)."""
@@ -357,9 +362,6 @@ def create_pre_sgie_probe(skip_manager, heuristics_manager=None, completed_vehic
                 else:
                     skip_manager.record_processed()
                 
-                # Note: Visual markers are applied in the OSD probe (after this)
-                # because they would be overwritten here anyway
-            
             try:
                 l_frame = l_frame.next
             except StopIteration:
