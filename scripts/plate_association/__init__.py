@@ -16,7 +16,8 @@ from .scoring import PlateVehicleScorer
 from .grid_lookup import SpatialGrid
 from .skip_logic import (
     SkipLogicManager, create_pre_sgie_probe,
-    get_heuristics_skipped, is_heuristics_active
+    get_heuristics_skipped, is_heuristics_active,
+    get_parked_vehicles, cleanup_parked_counts
 )
 from .heuristics import HighDensityHeuristics, quick_filter_high_density
 from .plate_parser import VehiclePlateParser, get_plate_parser
@@ -28,6 +29,8 @@ __all__ = [
     'create_pre_sgie_probe',
     'get_heuristics_skipped',
     'is_heuristics_active',
+    'get_parked_vehicles',
+    'cleanup_parked_counts',
     'HighDensityHeuristics',
     'quick_filter_high_density',
     'VehiclePlateParser',

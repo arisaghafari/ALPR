@@ -27,8 +27,8 @@ operate-on-gie-id=2
 operate-on-class-ids=0
 
 # --- INPUT SIZE ---
-input-object-min-width=41
-input-object-min-height=10
+input-object-min-width=32
+input-object-min-height=8
 #maintain-aspect-ratio=1
 maintain-aspect-ratio=0
 batch-size=4

@@ -10,7 +10,7 @@ Strategy:
 3. Ensure fairness - don't starve vehicles that stay long
 """
 
-from collections import defaultdict
+from collections import defaultdict, deque
 
 
 class HighDensityHeuristics:
@@ -28,6 +28,10 @@ class HighDensityHeuristics:
     HIGH_DENSITY_THRESHOLD = 5       # More than this = high density mode
     MAX_PROCESS_PER_FRAME = 4        # Max vehicles to send to SGIE (matches batch size)
     MAX_PROCESS_NORMAL = 20          # Max in normal mode (moderate cap)
+    
+    # Stationary (parked) detection - for skip_logic parked stage
+    POSITION_HISTORY_FRAMES = 15     # Frames to track for stationary detection
+    STATIONARY_THRESHOLD_PX = 45     # Max center movement (px) to consider parked
     
     # Scoring weights (only non-completed vehicles are scored, so no completion term)
     WEIGHT_SIZE = 0.45               # Larger vehicles score higher (closer = better visibility)
@@ -49,11 +53,34 @@ class HighDensityHeuristics:
         # Track frames since last processed for fairness
         self.frames_since_processed = defaultdict(int)
         
+        # Position history for stationary (parked) detection
+        self._position_history = defaultdict(
+            lambda: deque(maxlen=self.POSITION_HISTORY_FRAMES)
+        )
+        
         # Statistics
         self.stats = {
             'total_filtered': 0,
             'high_density_activations': 0,
         }
+    
+    def update_position_history(self, frame_num, vehicles):
+        """Update position history for each vehicle. Call before is_stationary checks."""
+        for vehicle_id, bbox in vehicles:
+            cx = bbox.left + bbox.width / 2
+            cy = bbox.top + bbox.height / 2
+            self._position_history[vehicle_id].append((cx, cy))
+    
+    def is_stationary(self, vehicle_id):
+        """True if vehicle center has moved less than STATIONARY_THRESHOLD_PX over history."""
+        history = self._position_history.get(vehicle_id)
+        if not history or len(history) < 3:
+            return False
+        cx_list = [p[0] for p in history]
+        cy_list = [p[1] for p in history]
+        dx = max(cx_list) - min(cx_list)
+        dy = max(cy_list) - min(cy_list)
+        return dx <= self.STATIONARY_THRESHOLD_PX and dy <= self.STATIONARY_THRESHOLD_PX
     
     def get_zone(self, vehicle_top, vehicle_height):
         """
@@ -211,11 +238,13 @@ class HighDensityHeuristics:
         Args:
             active_vehicle_ids: Set of currently visible vehicle IDs
         """
-        # Clean up wait counters
         stale_ids = [vid for vid in self.frames_since_processed 
                      if vid not in active_vehicle_ids]
         for vid in stale_ids:
             del self.frames_since_processed[vid]
+        for vid in list(self._position_history.keys()):
+            if vid not in active_vehicle_ids:
+                del self._position_history[vid]
 
 
 # Convenience function for quick filtering

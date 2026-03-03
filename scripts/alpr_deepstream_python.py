@@ -32,7 +32,8 @@ from pathlib import Path
 from plate_association import (
     PlateVehicleScorer, SpatialGrid, SkipLogicManager, 
     create_pre_sgie_probe, HighDensityHeuristics,
-    get_heuristics_skipped, is_heuristics_active
+    get_heuristics_skipped, is_heuristics_active,
+    get_parked_vehicles, cleanup_parked_counts
 )
 from plate_association.plate_parser import is_valid_plate_format
 
@@ -41,7 +42,7 @@ from plate_association.plate_parser import is_valid_plate_format
 # ==============================================================================
 CONFIG_DIR = "/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project"
 
-INPUT_VIDEO = f"{CONFIG_DIR}/input_videos/long_video01_h264.mp4"
+INPUT_VIDEO = f"{CONFIG_DIR}/input_videos/output_clip_fixed_2.mp4"
 OUTPUT_VIDEO = f"{CONFIG_DIR}/output_videos/output_video_python.mp4"
 
 cap = cv2.VideoCapture(INPUT_VIDEO)
@@ -327,10 +328,20 @@ def get_stable_plate_for_vehicle(vehicle_id, new_plate_text, current_frame):
     Returns:
         Stable plate text (most common in recent history) for THIS vehicle
     """
-    global vehicle_plate_history, vehicle_stable_plates, vehicle_last_seen
+    global vehicle_plate_history, vehicle_stable_plates, vehicle_locked_plates, vehicle_last_seen
     
     # Update last seen frame
     vehicle_last_seen[vehicle_id] = current_frame
+    
+    # Global uniqueness: same plate text cannot belong to multiple vehicles.
+    # If another vehicle already has this plate (stable/locked), reject for this vehicle.
+    if new_plate_text and len(new_plate_text) >= MIN_PLATE_LENGTH:
+        for vid, plate in vehicle_stable_plates.items():
+            if vid != vehicle_id and plate == new_plate_text:
+                return vehicle_stable_plates.get(vehicle_id, vehicle_locked_plates.get(vehicle_id, ""))
+        for vid, plate in vehicle_locked_plates.items():
+            if vid != vehicle_id and plate == new_plate_text:
+                return vehicle_stable_plates.get(vehicle_id, vehicle_locked_plates.get(vehicle_id, ""))
     
     # Add new recognition to this vehicle's history (only if valid length)
     if new_plate_text and len(new_plate_text) >= MIN_PLATE_LENGTH:
@@ -458,7 +469,8 @@ heuristics_manager = HighDensityHeuristics(
 pre_sgie_probe = create_pre_sgie_probe(
     skip_manager, 
     heuristics_manager=heuristics_manager if ENABLE_HEURISTICS else None,
-    completed_vehicles_set=total_vehicles_completed_ever
+    completed_vehicles_set=total_vehicles_completed_ever,
+    vehicles_with_stable_plate_ref=vehicle_stable_plates
 )
 
 # Cached vehicle labels from PGIE (primary model) - loaded from labelfile
@@ -557,17 +569,32 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                     vehicle_id = obj_meta.object_id
                     vehicle_type = _get_vehicle_type(obj_meta)
                     
-                    # Check if this vehicle was SKIPPED by heuristics
+                    # Check if this vehicle was SKIPPED by heuristics or PARKED
                     heuristics_skipped = get_heuristics_skipped(frame_num)
                     is_skipped_by_heuristics = vehicle_id in heuristics_skipped
+                    parked_vehicles = get_parked_vehicles(frame_num)
+                    is_parked = vehicle_id in parked_vehicles
                     
                     # Skip logic handling (only when enabled)
                     if ENABLE_SKIP_LOGIC:
                         # Restore bbox if it was shrunk by pre_sgie_probe
                         skip_manager.restore_bbox(obj_meta, frame_num)
                         
-                        # VISUAL: Skipped by heuristics = BLUE box + [SKIP] label
-                        if is_skipped_by_heuristics:
+                        # VISUAL: Parked = YELLOW | Heuristics = BLUE | Completed = GREEN | Stable (not completed) = ORANGE | No stable = default
+                        has_stable = vehicle_id in vehicle_stable_plates or vehicle_id in vehicle_locked_plates
+                        if is_parked:
+                            obj_meta.text_params.display_text = f"#{vehicle_id} [PARKED] ({vehicle_type})"
+                            obj_meta.text_params.set_bg_clr = 1
+                            obj_meta.text_params.text_bg_clr.red = 1.0
+                            obj_meta.text_params.text_bg_clr.green = 1.0
+                            obj_meta.text_params.text_bg_clr.blue = 0.0
+                            obj_meta.text_params.text_bg_clr.alpha = 0.8
+                            obj_meta.rect_params.border_color.red = 1.0
+                            obj_meta.rect_params.border_color.green = 1.0
+                            obj_meta.rect_params.border_color.blue = 0.0
+                            obj_meta.rect_params.border_color.alpha = 1.0
+                            obj_meta.rect_params.border_width = 4
+                        elif is_skipped_by_heuristics:
                             obj_meta.text_params.display_text = f"[SKIP] #{vehicle_id} ({vehicle_type})"
                             obj_meta.text_params.set_bg_clr = 1
                             obj_meta.text_params.text_bg_clr.red = 0.0
@@ -594,14 +621,28 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                             else:
                                 obj_meta.text_params.display_text = f"#{vehicle_id} ({vehicle_type})"
                                 obj_meta.text_params.set_bg_clr = 1
-                            # GREEN border (matches label)
+                            # GREEN border (completed)
                             obj_meta.rect_params.border_color.red = 0.0
                             obj_meta.rect_params.border_color.green = 0.6
                             obj_meta.rect_params.border_color.blue = 0.0
                             obj_meta.rect_params.border_color.alpha = 1.0
                             obj_meta.rect_params.border_width = 4
+                        elif has_stable:
+                            # Stable plate (has text) but not yet completed - ORANGE border
+                            stored_plate = vehicle_locked_plates.get(vehicle_id, vehicle_stable_plates.get(vehicle_id, ""))
+                            obj_meta.text_params.display_text = f"#{vehicle_id} {stored_plate} ({vehicle_type})"
+                            obj_meta.text_params.set_bg_clr = 1
+                            obj_meta.text_params.text_bg_clr.red = 1.0
+                            obj_meta.text_params.text_bg_clr.green = 0.5
+                            obj_meta.text_params.text_bg_clr.blue = 0.0
+                            obj_meta.text_params.text_bg_clr.alpha = 0.8
+                            obj_meta.rect_params.border_color.red = 1.0
+                            obj_meta.rect_params.border_color.green = 0.5
+                            obj_meta.rect_params.border_color.blue = 0.0
+                            obj_meta.rect_params.border_color.alpha = 1.0
+                            obj_meta.rect_params.border_width = 4
                         else:
-                            # Not stable yet - show just the ID
+                            # No stable plate - failed or in progress (default border)
                             obj_meta.text_params.display_text = f"#{vehicle_id} ({vehicle_type})"
                             obj_meta.text_params.set_bg_clr = 1
                     else:
@@ -641,19 +682,29 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
         plate_assignments = []  # (plate_meta, plate_text, parent_id, score)
         
         # First pass: collect all plate-to-vehicle assignments with scores
+        # BUG FIX: Use pipeline parent when available - spatial lookup can assign the same
+        # plate text to wrong vehicles when cars are far apart (e.g. #26 and #39 both showing "EF473RP").
         for plate_meta in plates_to_process:
             try:
                 parent_id = -1
                 score = 0.0
-                plate_rect = plate_meta.rect_params
-                plate_cx = plate_rect.left + plate_rect.width / 2
-                plate_cy = plate_rect.top + plate_rect.height / 2
-                
-                candidates = spatial_grid.get_candidate_vehicles(plate_cx, plate_cy)
-                if candidates:
-                    parent_id, score = plate_scorer.find_best_vehicle(
-                        plate_rect, candidates, min_score=0.1
-                    )
+                # Prefer pipeline parent (correct association from SGIE crop)
+                if hasattr(plate_meta, 'parent') and plate_meta.parent is not None:
+                    try:
+                        parent_id = plate_meta.parent.object_id
+                        score = 1.0  # Trust pipeline when parent is set
+                    except Exception:
+                        pass
+                # Fallback to spatial lookup when parent is None (e.g. back-to-back SGIE)
+                if parent_id < 0:
+                    plate_rect = plate_meta.rect_params
+                    plate_cx = plate_rect.left + plate_rect.width / 2
+                    plate_cy = plate_rect.top + plate_rect.height / 2
+                    candidates = spatial_grid.get_candidate_vehicles(plate_cx, plate_cy)
+                    if candidates:
+                        parent_id, score = plate_scorer.find_best_vehicle(
+                            plate_rect, candidates, min_score=0.1
+                        )
                 
                 if prioritized_vehicle_ids is not None and parent_id >= 0:
                     if parent_id not in prioritized_vehicle_ids:
@@ -758,9 +809,12 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
             total_plates = len(total_plates_by_vehicle)
             if ENABLE_SKIP_LOGIC:
                 skip_manager.cleanup(frame_count)
+                cleanup_parked_counts(set(vehicle_types_this_frame.keys()))
                 total_completed = len(total_vehicles_completed_ever)
                 print(f"[Info]{frame_count%TOTAL_FRAME}/{TOTAL_FRAME} | Plates found: {total_plates} | Vehicles completed: {total_completed}")
-            else:
+            if ENABLE_HEURISTICS:
+                heuristics_manager.cleanup(set(vehicle_types_this_frame.keys()))
+            if not ENABLE_SKIP_LOGIC:
                 print(f"[Info]{frame_count%TOTAL_FRAME}/{TOTAL_FRAME} | Plates found: {total_plates}")
         
         try:
