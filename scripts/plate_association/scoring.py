@@ -61,7 +61,6 @@ class PlateVehicleScorer:
         distance = abs(vehicle_bottom - plate_cy)
         normalized = distance / vehicle_height
         
-        # Score: 1.0 at bottom, 0.0 at middle or above
         score = max(0.0, 1.0 - normalized / 0.5)
         return score
     
@@ -87,7 +86,6 @@ class PlateVehicleScorer:
         distance = abs(plate_cx - vehicle_cx)
         normalized = distance / (vehicle_width / 2)
         
-        # Score: 1.0 at center, 0.0 at edge
         score = max(0.0, 1.0 - normalized)
         return score
     
@@ -115,7 +113,6 @@ class PlateVehicleScorer:
         
         ratio = plate_area / vehicle_area
         
-        # Score based on ratio
         if self.MIN_SIZE_RATIO <= ratio <= self.MAX_SIZE_RATIO:
             return 1.0
         elif ratio < self.MIN_SIZE_RATIO:

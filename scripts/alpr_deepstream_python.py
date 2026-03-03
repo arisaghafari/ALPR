@@ -42,7 +42,7 @@ from plate_association.plate_parser import is_valid_plate_format
 # ==============================================================================
 CONFIG_DIR = "/opt/nvidia/deepstream/deepstream-7.1/sources/alpr_project"
 
-INPUT_VIDEO = f"{CONFIG_DIR}/input_videos/output_clip_fixed_2.mp4"
+INPUT_VIDEO = f"{CONFIG_DIR}/input_videos/output_clip_fixed.mp4"
 OUTPUT_VIDEO = f"{CONFIG_DIR}/output_videos/output_video_python.mp4"
 
 cap = cv2.VideoCapture(INPUT_VIDEO)
@@ -668,34 +668,24 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
             except StopIteration:
                 break
         
-        # HIGH-DENSITY HEURISTICS: Now handled in pre-SGIE probe for REAL GPU savings!
-        # The pre-SGIE probe shrinks bboxes for low-priority vehicles, so SGIE skips them.
-        # This post-inference check is just a safety net / consistency check.
-        prioritized_vehicle_ids = None  # None = process all (filtering done at pre-SGIE)
+        prioritized_vehicle_ids = None  # Filtering done in pre-SGIE probe
         
-        # --- DUPLICATE PLATE FIX ---
-        # When Vehicle #1 and #2 are close/overlapping, SGIE crops each vehicle's bbox.
-        # Both crops can contain the SAME physical plate -> both get same LPR text.
-        # Without this constraint, both vehicles would show the same plate (e.g. "VW6AWPF").
-        # Solution: one plate text per vehicle per frame - assign only to best match.
-        # Strengthened: prefer vehicle that already owns this plate (established history).
+        # Duplicate plate resolution: one plate text per vehicle; prefer existing owner
         plate_assignments = []  # (plate_meta, plate_text, parent_id, score)
         
-        # First pass: collect all plate-to-vehicle assignments with scores
-        # BUG FIX: Use pipeline parent when available - spatial lookup can assign the same
-        # plate text to wrong vehicles when cars are far apart (e.g. #26 and #39 both showing "EF473RP").
+        # First pass: collect plate-to-vehicle assignments (prefer pipeline parent)
         for plate_meta in plates_to_process:
             try:
                 parent_id = -1
                 score = 0.0
-                # Prefer pipeline parent (correct association from SGIE crop)
+                # Use pipeline parent when available (correct association from SGIE crop)
                 if hasattr(plate_meta, 'parent') and plate_meta.parent is not None:
                     try:
                         parent_id = plate_meta.parent.object_id
                         score = 1.0  # Trust pipeline when parent is set
                     except Exception:
                         pass
-                # Fallback to spatial lookup when parent is None (e.g. back-to-back SGIE)
+                # Fallback to spatial lookup when parent is None
                 if parent_id < 0:
                     plate_rect = plate_meta.rect_params
                     plate_cx = plate_rect.left + plate_rect.width / 2

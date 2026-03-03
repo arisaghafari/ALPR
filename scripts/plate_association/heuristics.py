@@ -160,7 +160,7 @@ class HighDensityHeuristics:
         
         Args:
             vehicles: List of (vehicle_id, bbox) tuples (should be non-completed only)
-            completed_vehicles: Unused (kept for API compatibility)
+            completed_vehicles: Reserved for API compatibility
             
         Returns:
             List of (vehicle_id, bbox) tuples to process (sorted by priority)
