@@ -1,12 +1,14 @@
 [property]
 gpu-id=0
+scaling-compute-hw=1
 net-scale-factor=0.0039215697906911373
 
 # --- MODEL FILES ---
-tlt-encoded-model=us_lprnet_baseline18_deployable.etlt
+#tlt-encoded-model=lprnet_european_1518.etlt.onnx
+onnx-file=lprnet_european_1518.etlt.onnx
 labelfile-path=dict.txt
-model-engine-file=us_lprnet_baseline18_deployable.etlt_b8_gpu0_fp16.engine
-tlt-model-key=nvidia_tlt
+model-engine-file=lprnet_european_1518.etlt.onnx_b4_gpu0_fp16.engine
+#tlt-model-key=nvidia_tlt
 
 custom-lib-path=libnvdsinfer_custom_impl_lpr.so
 parse-classifier-func-name=NvDsInferParseCustomNVPlate
@@ -16,8 +18,8 @@ network-type=1
 network-mode=2
 process-mode=2
 
-classifier-threshold=0.5
-interval=2
+classifier-threshold=0.1
+interval=0
 
 # --- PIPELINE CONNECTION ---
 gie-unique-id=3
@@ -25,8 +27,8 @@ operate-on-gie-id=2
 operate-on-class-ids=0
 
 # --- INPUT SIZE ---
-input-object-min-width=50
-input-object-min-height=12
+input-object-min-width=32
+input-object-min-height=8
 #maintain-aspect-ratio=1
 maintain-aspect-ratio=0
-batch-size=8
+batch-size=4

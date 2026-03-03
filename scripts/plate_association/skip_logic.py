@@ -26,8 +26,8 @@ class SkipLogicManager:
     in subsequent frames to save GPU resources.
     """
     
-    def __init__(self, min_confident_readings=6, min_plate_length=5, 
-                 max_frames_missing=90):
+    def __init__(self, min_confident_readings=6, min_plate_length=7, 
+                 max_frames_missing=60):
         """
         Initialize the skip logic manager.
         
@@ -70,23 +70,24 @@ class SkipLogicManager:
         """Get number of completed vehicles."""
         return len(self.completed_vehicles)
     
-    def shrink_bbox_for_skip(self, obj_meta, frame_num):
+    def shrink_bbox_for_skip(self, obj_meta, frame_num, force_skip=False):
         """
         Shrink a vehicle's bbox so SGIE skips it.
         
-        Call this in pre-SGIE probe for completed vehicles.
-        Stores original bbox for later restoration.
+        Call for completed vehicles, parked, or heuristics-skipped.
+        force_skip=True: shrink for parked/heuristics (not in completed_vehicles).
         
         Args:
             obj_meta: NvDsObjectMeta for the vehicle
             frame_num: Current frame number
+            force_skip: If True, shrink regardless of completed (for parked/heuristics)
             
         Returns:
             True if bbox was shrunk, False otherwise
         """
         vehicle_id = obj_meta.object_id
         
-        if vehicle_id not in self.completed_vehicles:
+        if not force_skip and vehicle_id not in self.completed_vehicles:
             return False
         
         # Store original bbox
@@ -101,6 +102,10 @@ class SkipLogicManager:
         
         self.stats['total_skipped'] += 1
         return True
+    
+    def record_processed(self):
+        """Record that a vehicle was processed (not skipped) by SGIE."""
+        self.stats['total_processed'] += 1
     
     def restore_bbox(self, obj_meta, frame_num):
         """
@@ -160,14 +165,6 @@ class SkipLogicManager:
         return False
     
     def cleanup(self, current_frame):
-        """
-        Remove tracking data for vehicles no longer in frame.
-        
-        Call periodically (e.g., every 150 frames).
-        
-        Args:
-            current_frame: Current frame number
-        """
         # Find vehicles to remove
         vehicles_to_remove = []
         for vehicle_id, last_frame in self.vehicle_last_seen.items():
@@ -196,14 +193,51 @@ class SkipLogicManager:
         }
 
 
-def create_pre_sgie_probe(skip_manager):
+# Global set to track vehicles skipped by heuristics (for visual display)
+# Key: frame_num, Value: set of vehicle_ids skipped in that frame
+heuristics_skipped_vehicles = {}
+
+def get_heuristics_skipped(frame_num):
+    """Get set of vehicle IDs skipped by heuristics in this frame."""
+    return heuristics_skipped_vehicles.get(frame_num, set())
+
+def is_heuristics_active(frame_num):
+    """Check if heuristics was active (skipping vehicles) in this frame."""
+    return frame_num in heuristics_skipped_vehicles
+
+
+# Parked: stationary for N frames without completion = far, skip SGIE until they move
+parked_vehicles_for_display = {}  # frame_num -> set of vehicle_ids
+_parked_stationary_count = {}     # vehicle_id -> frames stationary without completion
+FRAMES_TO_FLAG_PARKED = 45        # Stationary this long without completion = parked (~1.5s at 30fps)
+
+def get_parked_vehicles(frame_num):
+    """Get set of vehicle IDs that are parked (for yellow border display)."""
+    return parked_vehicles_for_display.get(frame_num, set())
+
+def cleanup_parked_counts(active_vehicle_ids):
+    """Remove parked count for vehicles no longer in frame."""
+    global _parked_stationary_count
+    stale = [vid for vid in _parked_stationary_count if vid not in active_vehicle_ids]
+    for vid in stale:
+        del _parked_stationary_count[vid]
+
+
+def create_pre_sgie_probe(skip_manager, heuristics_manager=None, completed_vehicles_set=None,
+                          vehicles_with_stable_plate_ref=None):
     """
     Create a probe function to run BEFORE Secondary GIE.
     
-    This probe shrinks bboxes of completed vehicles so SGIE skips them.
+    This probe:
+    1. Shrinks bboxes of completed vehicles so SGIE skips them
+    2. Parked: stationary for N frames without completion = far, skip SGIE until they move
+    3. In HIGH-DENSITY mode: Only processes top N vehicles by priority score
     
     Args:
         skip_manager: SkipLogicManager instance
+        heuristics_manager: Optional HighDensityHeuristics (for stationary detection + high-density)
+        completed_vehicles_set: Optional set of completed vehicle IDs
+        vehicles_with_stable_plate_ref: Dict/set vehicle_id -> plate (to check has stable = not parked)
         
     Returns:
         Probe function to attach before SGIE
@@ -227,22 +261,104 @@ def create_pre_sgie_probe(skip_manager):
             except StopIteration:
                 break
             
+            # PHASE 1: Collect all vehicles in this frame
+            vehicles_in_frame = []  # List of (vehicle_id, obj_meta)
             l_obj = frame_meta.obj_meta_list
             while l_obj is not None:
                 try:
                     obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
-                    
-                    # Only process vehicles (primary GIE, gie-unique-id=1)
-                    if obj_meta.unique_component_id == 1:
-                        skip_manager.shrink_bbox_for_skip(obj_meta, frame_num)
-                    
+                    if obj_meta.unique_component_id == 1:  # Vehicle
+                        vehicle_id = obj_meta.object_id
+                        vehicles_in_frame.append((vehicle_id, obj_meta))
                 except Exception:
                     pass
-                
                 try:
                     l_obj = l_obj.next
                 except StopIteration:
                     break
+            
+            # PHASE 2: Determine which vehicles to skip
+            vehicles_to_skip = set()
+            is_high_density = False
+            
+            # Get completed vehicles set (needed for both debug and processing)
+            completed = completed_vehicles_set if completed_vehicles_set else skip_manager.completed_vehicles
+            
+            # OPTIMIZATION: Separate completed vs non-completed vehicles
+            non_completed_vehicles = []
+            completed_in_frame = []
+            for vid, obj_meta in vehicles_in_frame:
+                if vid in completed:
+                    completed_in_frame.append((vid, obj_meta))
+                else:
+                    non_completed_vehicles.append((vid, obj_meta))
+            
+            # Update position history for parked detection
+            vehicles_for_scoring = [(vid, obj_meta.rect_params) for vid, obj_meta in non_completed_vehicles]
+            if heuristics_manager and vehicles_for_scoring and hasattr(heuristics_manager, 'update_position_history'):
+                heuristics_manager.update_position_history(frame_num, vehicles_for_scoring)
+            
+            # PARKED: stationary for N frames without completion = far, skip SGIE
+            parked_this_frame = set()
+            has_stable = vehicles_with_stable_plate_ref if vehicles_with_stable_plate_ref else {}
+            for vehicle_id, obj_meta in non_completed_vehicles:
+                if skip_manager.is_completed(vehicle_id):
+                    continue
+                if not heuristics_manager or not hasattr(heuristics_manager, 'is_stationary'):
+                    continue
+                if heuristics_manager.is_stationary(vehicle_id):
+                    if vehicle_id not in has_stable:
+                        _parked_stationary_count[vehicle_id] = _parked_stationary_count.get(vehicle_id, 0) + 1
+                        if _parked_stationary_count[vehicle_id] >= FRAMES_TO_FLAG_PARKED:
+                            parked_this_frame.add(vehicle_id)
+                            vehicles_to_skip.add(vehicle_id)
+                    else:
+                        _parked_stationary_count.pop(vehicle_id, None)
+                else:
+                    _parked_stationary_count.pop(vehicle_id, None)
+            parked_vehicles_for_display[frame_num] = parked_this_frame
+            old_frames = [f for f in parked_vehicles_for_display if f < frame_num - 10]
+            for f in old_frames:
+                parked_vehicles_for_display.pop(f, None)
+            
+            # HIGH-DENSITY HEURISTICS: Only count NON-COMPLETED vehicles for threshold
+            # (completed vehicles don't need processing anyway)
+            if heuristics_manager and len(non_completed_vehicles) > heuristics_manager.HIGH_DENSITY_THRESHOLD:
+                is_high_density = True
+                
+                # Get prioritized list (top N by score) - no completed vehicles in this list!
+                prioritized = heuristics_manager.filter_and_prioritize(
+                    vehicles_for_scoring, completed  # completed set used for scoring weights
+                )
+                prioritized_ids = set(vid for vid, _ in prioritized)
+                
+                # Mark non-prioritized (non-completed) for skipping
+                for vid, obj_meta in non_completed_vehicles:
+                    if vid not in prioritized_ids:
+                        vehicles_to_skip.add(vid)
+                
+                # Store skipped vehicles for visual display
+                heuristics_skipped_vehicles[frame_num] = vehicles_to_skip.copy()
+                
+                # Cleanup old entries (keep last 10 frames)
+                old_frames = [f for f in heuristics_skipped_vehicles if f < frame_num - 10]
+                for f in old_frames:
+                    heuristics_skipped_vehicles.pop(f, None)
+            
+            # PHASE 3: Apply skip logic (shrink bboxes)
+            for vehicle_id, obj_meta in vehicles_in_frame:
+                should_skip = skip_manager.is_completed(vehicle_id) or vehicle_id in vehicles_to_skip
+                
+                if should_skip:
+                    skip_manager.shrink_bbox_for_skip(
+                        obj_meta, frame_num,
+                        force_skip=(vehicle_id in vehicles_to_skip)
+                    )
+                else:
+                    skip_manager.record_processed()
+                
+                # Note: Visual markers are applied in the OSD probe (after this)
+                # because they would be overwritten here anyway
             
             try:
                 l_frame = l_frame.next
@@ -252,4 +368,3 @@ def create_pre_sgie_probe(skip_manager):
         return Gst.PadProbeReturn.OK
     
     return pre_sgie_probe
-

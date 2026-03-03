@@ -129,7 +129,11 @@ class PlateVehicleScorer:
                                  vehicle_left, vehicle_top, 
                                  vehicle_width, vehicle_height):
         """
-        Check if plate center is inside vehicle bounding box.
+        Check if plate center is inside or near vehicle bounding box.
+        
+        Allows margin at bottom (bumper area) and sides since:
+        - Plates are often at the bumper, which may be outside vehicle bbox
+        - Vehicle detection boxes may not include full bumper area
         
         Args:
             plate_cx, plate_cy: Plate center coordinates
@@ -137,10 +141,15 @@ class PlateVehicleScorer:
             vehicle_width, vehicle_height: Vehicle bbox dimensions
         
         Returns:
-            True if plate center is inside vehicle bbox
+            True if plate center is inside or near vehicle bbox
         """
-        return (vehicle_left <= plate_cx <= vehicle_left + vehicle_width and
-                vehicle_top <= plate_cy <= vehicle_top + vehicle_height)
+        # Allow 30% margin at bottom (for bumper/plate area)
+        # Allow 20% margin on sides
+        margin_bottom = vehicle_height * 0.3
+        margin_side = vehicle_width * 0.2
+        
+        return (vehicle_left - margin_side <= plate_cx <= vehicle_left + vehicle_width + margin_side and
+                vehicle_top <= plate_cy <= vehicle_top + vehicle_height + margin_bottom)
     
     def calculate_score(self, plate_rect, vehicle_rect):
         """
@@ -214,4 +223,3 @@ class PlateVehicleScorer:
             return best_vehicle_id, best_score
         
         return 0, 0.0
-

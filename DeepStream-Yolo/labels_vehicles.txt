@@ -1,0 +1,7 @@
+Car
+Car w. trailer
+Bus
+Truck
+Truck w. Trailer
+Moto
+Van

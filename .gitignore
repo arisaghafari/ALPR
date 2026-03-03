@@ -9,6 +9,7 @@ __pycache__
 *.onnx
 *.so
 *.etlt
+*.tlt
 *.mp4
 *.jpg
 *.png
